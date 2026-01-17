@@ -121,12 +121,6 @@ st.markdown("""
 FOLDER_ID = "1hX2jwUrAgi4Fr8xkcFWjCW6vbk6lsIlP" 
 FILE_NAME = "Kompilasi_Data_1Tahun.csv"
 
-W = dict(
-    trend_akum=0.40, trend_ff=0.30, trend_mfv=0.20, trend_mom=0.10,
-    mom_price=0.40,  mom_vol=0.25,  mom_akum=0.25,  mom_ff=0.10,
-    blend_trend=0.35, blend_mom=0.35, blend_nbsa=0.20, blend_fcontrib=0.05, blend_unusual=0.05
-)
-
 # ==============================================================================
 # 📦 3) DATA LOADER
 # ==============================================================================
@@ -205,13 +199,6 @@ def pct_rank(s: pd.Series):
     s = pd.to_numeric(s, errors="coerce")
     return s.rank(pct=True, method="average").fillna(0) * 100
 
-def to_pct(s: pd.Series):
-    s = pd.to_numeric(s, errors="coerce").replace([np.inf, -np.inf], np.nan)
-    if s.notna().sum() <= 1: return pd.Series(50, index=s.index)
-    mn, mx = s.min(), s.max()
-    if pd.isna(mn) or mn == mx: return pd.Series(50, index=s.index)
-    return (s - mn) / (mx - mn) * 100
-
 def calculate_potential_score(df, latest_date):
     trend_start = latest_date - pd.Timedelta(days=30)
     mom_start = latest_date - pd.Timedelta(days=7)
@@ -231,7 +218,6 @@ def calculate_potential_score(df, latest_date):
         sector=('Sector', 'last')
     ).reset_index()
     
-    # Proxy Logic
     tr['Trend Score'] = (pct_rank(tr['total_net_ff_rp']) * 0.4 + 
                          pct_rank(tr['total_money_flow']) * 0.3 + 
                          pct_rank(tr['avg_change_pct']) * 0.3)
@@ -250,6 +236,10 @@ def calculate_potential_score(df, latest_date):
     # Merge
     rank = tr.merge(mo[['Stock Code', 'Momentum Score']], on='Stock Code', how='outer')
     rank['Potential Score'] = (rank['Trend Score'].fillna(0)*0.5 + rank['Momentum Score'].fillna(0)*0.5)
+    
+    # Calculate NBSA & Foreign score for Radar
+    rank['NBSA Score'] = pct_rank(rank['total_net_ff_rp'])
+    rank['Foreign Contrib Score'] = pct_rank(rank['total_net_ff_rp']) # Proxy
     
     top20 = rank.sort_values('Potential Score', ascending=False).head(20).copy()
     top20.insert(0, 'Rank', range(1, len(top20)+1))
@@ -288,6 +278,42 @@ def calculate_msci_projection_v2(df, latest_date, usd_rate):
         
     df_msci = pd.DataFrame(results).sort_values(by='Float Cap ($B)', ascending=False)
     return df_msci
+
+# Simulai Portfolio
+def simulate_portfolio_range(df, capital, start, end):
+    # Simplified Logic for Portfolio
+    top20, _, _ = calculate_potential_score(df, start)
+    if top20.empty: return pd.DataFrame(), {}, "error"
+    
+    df_end = df[df['Last Trading Date'] == end]
+    if df_end.empty: return pd.DataFrame(), {}, "No end data"
+    
+    results = []
+    alloc = capital / len(top20)
+    
+    for _, row in top20.iterrows():
+        code = row['Stock Code']
+        buy = row['last_price']
+        end_row = df_end[df_end['Stock Code'] == code]
+        
+        sell = end_row.iloc[0]['Close'] if not end_row.empty else buy
+        gain = (sell - buy) / buy
+        val = alloc * (1 + gain)
+        
+        results.append({
+            'Stock Code': code, 'Sector': row['sector'],
+            'Buy Price': buy, 'Sell Price': sell,
+            'Gain/Loss (Rp)': val - alloc, 'ROI (%)': gain*100,
+            'Final Value': val
+        })
+        
+    df_res = pd.DataFrame(results)
+    summary = {
+        'Final Portfolio Value': df_res['Final Value'].sum(),
+        'Net Profit': df_res['Final Value'].sum() - capital,
+        'Total ROI': (df_res['Final Value'].sum() - capital)/capital * 100
+    }
+    return df_res, summary, "success"
 
 # ==============================================================================
 # 🎨 5) MAIN LAYOUT & UI
@@ -341,20 +367,20 @@ if menu == "📊 Market Dashboard":
     col_m1, col_m2, col_m3, col_m4 = st.columns(4)
     with col_m1:
         st.markdown("""<div class="css-card">""", unsafe_allow_html=True)
-        st.metric("Total Transaksi", f"Rp {df_day['Value'].sum()/1e12:.2f} T")
+        st.metric("Total Transaksi", f"Rp {df_day['Value'].sum()/1e12:,.2f} T")
         st.markdown("</div>", unsafe_allow_html=True)
     with col_m2:
         st.markdown("""<div class="css-card">""", unsafe_allow_html=True)
-        st.metric("Saham Aktif", f"{len(df_day)}")
+        st.metric("Saham Aktif", f"{len(df_day):,}")
         st.markdown("</div>", unsafe_allow_html=True)
     with col_m3:
         st.markdown("""<div class="css-card">""", unsafe_allow_html=True)
-        st.metric("Unusual Vol", f"{df_day['Unusual Volume'].sum()}")
+        st.metric("Unusual Vol", f"{df_day['Unusual Volume'].sum():,}")
         st.markdown("</div>", unsafe_allow_html=True)
     with col_m4:
         st.markdown("""<div class="css-card">""", unsafe_allow_html=True)
         net_foreign = df_day['NFF (Rp)'].sum()
-        st.metric("Net Foreign", f"Rp {net_foreign/1e9:.1f} M", delta_color="normal" if net_foreign > 0 else "inverse")
+        st.metric("Net Foreign", f"Rp {net_foreign/1e9:,.1f} M", delta_color="normal" if net_foreign > 0 else "inverse")
         st.markdown("</div>", unsafe_allow_html=True)
 
     # 3. Market Map & Tables
@@ -379,7 +405,7 @@ if menu == "📊 Market Dashboard":
             hide_index=True, 
             use_container_width=True,
             column_config={
-                "Close": st.column_config.NumberColumn(format="Rp %d"),
+                "Close": st.column_config.NumberColumn(format="Rp %,d"),
                 "Change %": st.column_config.NumberColumn(format="%.2f %%")
             },
             height=400
@@ -415,17 +441,17 @@ elif menu == "🔍 Deep Dive Analysis":
         
         k2.markdown(f"""<div class="css-card" style="text-align:center;">
             <div style="font-size:14px; color:#A3AED0;">Net Foreign (Daily)</div>
-            <div style="font-size:24px; font-weight:700; color:#2B3674;">Rp {last['NFF (Rp)']/1e9:.1f} M</div>
+            <div style="font-size:24px; font-weight:700; color:#2B3674;">Rp {last['NFF (Rp)']/1e9:,.1f} M</div>
         </div>""", unsafe_allow_html=True)
         
         k3.markdown(f"""<div class="css-card" style="text-align:center;">
             <div style="font-size:14px; color:#A3AED0;">Money Flow Value</div>
-            <div style="font-size:24px; font-weight:700; color:#2B3674;">Rp {last['Money Flow Value']/1e9:.1f} M</div>
+            <div style="font-size:24px; font-weight:700; color:#2B3674;">Rp {last['Money Flow Value']/1e9:,.1f} M</div>
         </div>""", unsafe_allow_html=True)
         
         k4.markdown(f"""<div class="css-card" style="text-align:center;">
             <div style="font-size:14px; color:#A3AED0;">Transaction Value</div>
-            <div style="font-size:24px; font-weight:700; color:#2B3674;">Rp {last['Value']/1e9:.1f} M</div>
+            <div style="font-size:24px; font-weight:700; color:#2B3674;">Rp {last['Value']/1e9:,.1f} M</div>
         </div>""", unsafe_allow_html=True)
         
         # Advanced Charts in Tabs
@@ -451,7 +477,8 @@ elif menu == "🔍 Deep Dive Analysis":
             stock_df['Cum NFF'] = stock_df['NFF (Rp)'].cumsum()
             fig2 = px.area(stock_df, x='Last Trading Date', y='Cum NFF', title='Cumulative Foreign Flow (YTD)')
             fig2.update_layout(plot_bgcolor='white', font=dict(color='#2B3674'))
-            fig2.update_traces(line_color='#4318FF', fill_color='rgba(67, 24, 255, 0.1)')
+            # --- FIX: Menggunakan fillcolor alih-alih fill_color ---
+            fig2.update_traces(line_color='#4318FF', fillcolor='rgba(67, 24, 255, 0.1)')
             st.plotly_chart(fig2, use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
@@ -483,7 +510,8 @@ elif menu == "🏆 Algorithmic Picks":
                     top20,
                     column_config={
                         "Potential Score": st.column_config.ProgressColumn("Score", min_value=0, max_value=100, format="%.1f"),
-                        "last_price": st.column_config.NumberColumn("Close", format="Rp %d"),
+                        "last_price": st.column_config.NumberColumn("Close", format="Rp %,d"),
+                        "total_net_ff_rp": st.column_config.NumberColumn("Net Foreign", format="Rp %,d"),
                         "last_final_signal": "Signal"
                     },
                     hide_index=True,
@@ -508,6 +536,7 @@ elif menu == "🏆 Algorithmic Picks":
                 st.plotly_chart(fig, use_container_width=True)
                 
                 st.metric("Total Score", f"{best['Potential Score']:.1f}")
+                st.metric("Last Price", f"Rp {best['last_price']:,.0f}")
                 st.markdown('</div>', unsafe_allow_html=True)
 
 # PAGE 4: PORTFOLIO
@@ -531,7 +560,6 @@ elif menu == "💼 Portfolio Simulator":
         if pd.Timestamp(start_d) >= pd.Timestamp(end_d): st.error("Tanggal Jual harus setelah Beli.")
         else:
             with st.spinner("Menghitung PnL..."):
-                from app import simulate_portfolio_range # Assuming func is accessible or pasted above
                 df_port, sum_port, msg = simulate_portfolio_range(df, cap, pd.Timestamp(start_d), pd.Timestamp(end_d))
                 
                 if msg == "success":
@@ -542,7 +570,16 @@ elif menu == "💼 Portfolio Simulator":
                     r3.markdown(f"""<div class="css-card"><div style="color:#A3AED0;">ROI</div><div style="font-size:24px; font-weight:bold; color:#4318FF;">{sum_port['Total ROI']:.2f}%</div></div>""", unsafe_allow_html=True)
                     
                     st.markdown('<div class="css-card">', unsafe_allow_html=True)
-                    st.dataframe(df_port[['Stock Code', 'Sector', 'Buy Price', 'Sell Price', 'Gain/Loss (Rp)', 'ROI (%)']], use_container_width=True)
+                    st.dataframe(
+                        df_port[['Stock Code', 'Sector', 'Buy Price', 'Sell Price', 'Gain/Loss (Rp)', 'ROI (%)']], 
+                        use_container_width=True,
+                        column_config={
+                            "Buy Price": st.column_config.NumberColumn(format="Rp %,d"),
+                            "Sell Price": st.column_config.NumberColumn(format="Rp %,d"),
+                            "Gain/Loss (Rp)": st.column_config.NumberColumn(format="Rp %,d"),
+                            "ROI (%)": st.column_config.NumberColumn(format="%.2f %%")
+                        }
+                    )
                     st.markdown('</div>', unsafe_allow_html=True)
 
 # PAGE 5: MSCI
@@ -589,7 +626,10 @@ elif menu == "🌏 MSCI Projector":
         st.dataframe(
             df_msci[df_msci['Status'] == "✅ Potential Standard"][['Stock Code', 'Status', 'Float Cap ($B)', 'ATVR 12M (%)']], 
             use_container_width=True,
-            column_config={"Float Cap ($B)": st.column_config.NumberColumn(format="$ %.2f B"), "ATVR 12M (%)": st.column_config.NumberColumn(format="%.2f %%")}
+            column_config={
+                "Float Cap ($B)": st.column_config.NumberColumn(format="$ %.2f B"), 
+                "ATVR 12M (%)": st.column_config.NumberColumn(format="%.2f %%")
+            }
         )
         st.markdown('</div>', unsafe_allow_html=True)
 
