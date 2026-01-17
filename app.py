@@ -121,6 +121,13 @@ st.markdown("""
 FOLDER_ID = "1hX2jwUrAgi4Fr8xkcFWjCW6vbk6lsIlP" 
 FILE_NAME = "Kompilasi_Data_1Tahun.csv"
 
+# Bobot scoring (dipertahankan)
+W = dict(
+    trend_akum=0.40, trend_ff=0.30, trend_mfv=0.20, trend_mom=0.10,
+    mom_price=0.40,  mom_vol=0.25,  mom_akum=0.25,  mom_ff=0.10,
+    blend_trend=0.35, blend_mom=0.35, blend_nbsa=0.20, blend_fcontrib=0.05, blend_unusual=0.05
+)
+
 # ==============================================================================
 # 📦 3) DATA LOADER
 # ==============================================================================
@@ -193,7 +200,7 @@ def load_data():
         return pd.DataFrame(), f"❌ Data Load Error: {e}", "error"
 
 # ==============================================================================
-# 🧠 4) ANALYTICS ENGINE
+# 🧠 4) ANALYTICS ENGINE (ALL LOGIC RESTORED)
 # ==============================================================================
 def pct_rank(s: pd.Series):
     s = pd.to_numeric(s, errors="coerce")
@@ -246,40 +253,61 @@ def calculate_potential_score(df, latest_date):
     return top20, "Scored", "success"
 
 @st.cache_data(ttl=3600)
-def calculate_msci_projection_v2(df, latest_date, usd_rate):
-    start_12m = latest_date - pd.Timedelta(days=365)
-    start_3m = latest_date - pd.Timedelta(days=90)
+def calculate_flow_leaders(df, max_date):
+    """Fungsi Restorasi Tab NFF & Money Flow"""
+    periods = {'7D': 7, '30D': 30, '90D': 90}
+    nff_results = {}
+    mfv_results = {}
     
-    df_12m = df[(df['Last Trading Date'] >= start_12m) & (df['Last Trading Date'] <= latest_date)]
-    df_3m = df[(df['Last Trading Date'] >= start_3m) & (df['Last Trading Date'] <= latest_date)]
-    df_last = df[df['Last Trading Date'] == latest_date].copy()
+    latest_data = df[df['Last Trading Date'] == max_date].set_index('Stock Code')
     
-    results = []
-    for _, row in df_last.iterrows():
-        code = row['Stock Code']
-        val_12m = df_12m[df_12m['Stock Code'] == code]['Value'].sum()
-        val_3m = df_3m[df_3m['Stock Code'] == code]['Value'].sum()
+    for name, days in periods.items():
+        start_date = max_date - pd.Timedelta(days=days)
+        df_period = df[df['Last Trading Date'] >= start_date].copy()
         
-        float_mcap_idr_t = (row['Close'] * row.get('Listed Shares', 0) * row.get('Free Float', 0)/100) / 1e12
-        full_mcap_usd_b = (row['Close'] * row.get('Listed Shares', 0)) / usd_rate / 1e9
-        float_mcap_usd_b = (float_mcap_idr_t * 1e12) / usd_rate / 1e9
+        # NFF Agg
+        nff_agg = df_period.groupby('Stock Code')['NFF (Rp)'].sum().reset_index()
+        nff_agg = nff_agg.join(latest_data[['Close', 'Sector']], on='Stock Code')
+        nff_agg.columns = ['Stock Code', 'Total Net FF (Rp)', 'Close', 'Sector']
+        nff_results[name] = nff_agg.sort_values('Total Net FF (Rp)', ascending=False)
         
-        float_mcap_full = float_mcap_idr_t * 1e12
-        atvr_12m = (val_12m / float_mcap_full * 100) if float_mcap_full > 0 else 0
-        atvr_3m = ((val_3m * 4) / float_mcap_full * 100) if float_mcap_full > 0 else 0
-            
-        results.append({
-            'Stock Code': code, 'Sector': row['Sector'],
-            'Float Cap (IDR T)': float_mcap_idr_t,
-            'Full Cap ($B)': full_mcap_usd_b,
-            'Float Cap ($B)': float_mcap_usd_b,
-            'ATVR 12M (%)': atvr_12m, 'ATVR 3M (%)': atvr_3m
-        })
+        # MFV Agg
+        mfv_agg = df_period.groupby('Stock Code')['Money Flow Value'].sum().reset_index()
+        mfv_agg = mfv_agg.join(latest_data[['Close', 'Sector']], on='Stock Code')
+        mfv_agg.columns = ['Stock Code', 'Total Money Flow (Rp)', 'Close', 'Sector']
+        mfv_results[name] = mfv_agg.sort_values('Total Money Flow (Rp)', ascending=False)
         
-    df_msci = pd.DataFrame(results).sort_values(by='Float Cap ($B)', ascending=False)
-    return df_msci
+    return nff_results, mfv_results
 
-# Simulasi Portfolio
+def run_backtest_analysis(df, days_back=90):
+    """Fungsi Restorasi Backtest Logic"""
+    all_dates = sorted(df['Last Trading Date'].unique())
+    if len(all_dates) < days_back: days_back = len(all_dates) - 30 
+    start_idx = max(30, len(all_dates) - days_back)
+    simulation_dates = all_dates[start_idx:]
+    latest_prices = df[df['Last Trading Date'] == all_dates[-1]].set_index('Stock Code')['Close']
+    
+    backtest_log = []
+    
+    for i, sim_date in enumerate(simulation_dates):
+        sim_date_ts = pd.Timestamp(sim_date)
+        try:
+            top20, _, status = calculate_potential_score(df, sim_date_ts)
+            if status == "success" and not top20.empty:
+                # Ambil top 5 saja per hari biar ga kebanyakan
+                for idx, row in top20.head(5).iterrows():
+                    code = row['Stock Code']
+                    entry_price = row['last_price']
+                    curr_price = latest_prices.get(code, np.nan)
+                    ret_pct = ((curr_price - entry_price) / entry_price * 100) if (pd.notna(curr_price) and entry_price > 0) else 0
+                    backtest_log.append({
+                        'Signal Date': sim_date_ts, 'Stock Code': code, 
+                        'Entry Price': entry_price, 'Current Price': curr_price, 
+                        'Return (%)': ret_pct, 'Score': row['Potential Score']
+                    })
+        except: continue
+    return pd.DataFrame(backtest_log)
+
 def simulate_portfolio_range(df, capital, start, end):
     top20, _, _ = calculate_potential_score(df, start)
     if top20.empty: return pd.DataFrame(), {}, "error"
@@ -314,6 +342,40 @@ def simulate_portfolio_range(df, capital, start, end):
     }
     return df_res, summary, "success"
 
+@st.cache_data(ttl=3600)
+def calculate_msci_projection_v2(df, latest_date, usd_rate):
+    start_12m = latest_date - pd.Timedelta(days=365)
+    start_3m = latest_date - pd.Timedelta(days=90)
+    
+    df_12m = df[(df['Last Trading Date'] >= start_12m) & (df['Last Trading Date'] <= latest_date)]
+    df_3m = df[(df['Last Trading Date'] >= start_3m) & (df['Last Trading Date'] <= latest_date)]
+    df_last = df[df['Last Trading Date'] == latest_date].copy()
+    
+    results = []
+    for _, row in df_last.iterrows():
+        code = row['Stock Code']
+        val_12m = df_12m[df_12m['Stock Code'] == code]['Value'].sum()
+        val_3m = df_3m[df_3m['Stock Code'] == code]['Value'].sum()
+        
+        float_mcap_idr_t = (row['Close'] * row.get('Listed Shares', 0) * row.get('Free Float', 0)/100) / 1e12
+        full_mcap_usd_b = (row['Close'] * row.get('Listed Shares', 0)) / usd_rate / 1e9
+        float_mcap_usd_b = (float_mcap_idr_t * 1e12) / usd_rate / 1e9
+        
+        float_mcap_full = float_mcap_idr_t * 1e12
+        atvr_12m = (val_12m / float_mcap_full * 100) if float_mcap_full > 0 else 0
+        atvr_3m = ((val_3m * 4) / float_mcap_full * 100) if float_mcap_full > 0 else 0
+            
+        results.append({
+            'Stock Code': code, 'Sector': row['Sector'],
+            'Float Cap (IDR T)': float_mcap_idr_t,
+            'Full Cap ($B)': full_mcap_usd_b,
+            'Float Cap ($B)': float_mcap_usd_b,
+            'ATVR 12M (%)': atvr_12m, 'ATVR 3M (%)': atvr_3m
+        })
+        
+    df_msci = pd.DataFrame(results).sort_values(by='Float Cap ($B)', ascending=False)
+    return df_msci
+
 # ==============================================================================
 # 🎨 5) MAIN LAYOUT & UI
 # ==============================================================================
@@ -331,7 +393,10 @@ with st.sidebar:
     menu = st.radio("MAIN MENU", [
         "📊 Market Dashboard", 
         "🔍 Deep Dive Analysis", 
-        "🏆 Algorithmic Picks", 
+        "📋 Data Explorer",
+        "🏆 Algorithmic Picks",
+        "🌊 Flow Analysis (NFF/MF)",
+        "🧪 Backtest System",
         "💼 Portfolio Simulator", 
         "🌏 MSCI Projector"
     ])
@@ -352,7 +417,6 @@ with st.sidebar:
 
 # PAGE 1: DASHBOARD
 if menu == "📊 Market Dashboard":
-    # 1. Header Banner
     st.markdown(f"""
     <div class="header-banner">
         <div class="header-title">Welcome, Stock Analyzers! 👋</div>
@@ -362,7 +426,6 @@ if menu == "📊 Market Dashboard":
     
     df_day = df[df['Last Trading Date'].dt.date == sel_date]
     
-    # 2. Key Metrics Row (Card Style)
     col_m1, col_m2, col_m3, col_m4 = st.columns(4)
     with col_m1:
         st.markdown("""<div class="css-card">""", unsafe_allow_html=True)
@@ -382,9 +445,7 @@ if menu == "📊 Market Dashboard":
         st.metric("Net Foreign", f"Rp {net_foreign/1e9:,.1f} M", delta_color="normal" if net_foreign > 0 else "inverse")
         st.markdown("</div>", unsafe_allow_html=True)
 
-    # 3. Market Map & Tables
     col_c1, col_c2 = st.columns([2, 1])
-    
     with col_c1:
         st.markdown('<div class="css-card">', unsafe_allow_html=True)
         st.markdown('<div class="card-title">🗺️ Sector Market Map</div>', unsafe_allow_html=True)
@@ -400,13 +461,8 @@ if menu == "📊 Market Dashboard":
         st.markdown('<div class="card-title">🚀 Top Gainers</div>', unsafe_allow_html=True)
         gainers = df_day.nlargest(10, 'Change %')[['Stock Code', 'Close', 'Change %']]
         st.dataframe(
-            gainers, 
-            hide_index=True, 
-            use_container_width=True,
-            column_config={
-                "Close": st.column_config.NumberColumn(format="Rp %,d"),
-                "Change %": st.column_config.NumberColumn(format="%.2f %%")
-            },
+            gainers, hide_index=True, use_container_width=True,
+            column_config={"Close": st.column_config.NumberColumn(format="Rp %,d"), "Change %": st.column_config.NumberColumn(format="%.2f %%")},
             height=400
         )
         st.markdown('</div>', unsafe_allow_html=True)
@@ -414,101 +470,62 @@ if menu == "📊 Market Dashboard":
 # PAGE 2: DEEP DIVE
 elif menu == "🔍 Deep Dive Analysis":
     st.markdown('<h2 style="color:#2B3674;">🔍 Individual Stock Scanner</h2>', unsafe_allow_html=True)
-    
-    # Filter Bar (White Card)
     st.markdown('<div class="css-card">', unsafe_allow_html=True)
     stocks = sorted(df['Stock Code'].unique())
-    col_s1, col_s2 = st.columns([3, 1])
-    with col_s1:
-        sel_stock = st.selectbox("Cari Kode Saham:", stocks, index=stocks.index('BBRI') if 'BBRI' in stocks else 0)
-    with col_s2:
-        st.write("") # Spacer
+    sel_stock = st.selectbox("Cari Kode Saham:", stocks, index=stocks.index('BBRI') if 'BBRI' in stocks else 0)
     st.markdown('</div>', unsafe_allow_html=True)
     
-    # Process Data
     stock_df = df[df['Stock Code'] == sel_stock].sort_values('Last Trading Date')
     if not stock_df.empty:
         last = stock_df.iloc[-1]
-        
-        # KPI Row
         k1, k2, k3, k4 = st.columns(4)
-        k1.markdown(f"""<div class="css-card" style="text-align:center;">
-            <div style="font-size:14px; color:#A3AED0;">Harga Terakhir</div>
-            <div style="font-size:24px; font-weight:700; color:#2B3674;">Rp {last['Close']:,.0f}</div>
-            <div style="color:{'green' if last['Change %']>0 else 'red'}; font-weight:bold;">{last['Change %']:.2f}%</div>
-        </div>""", unsafe_allow_html=True)
+        k1.markdown(f"""<div class="css-card" style="text-align:center;"><div style="font-size:14px; color:#A3AED0;">Harga Terakhir</div><div style="font-size:24px; font-weight:700; color:#2B3674;">Rp {last['Close']:,.0f}</div><div style="color:{'green' if last['Change %']>0 else 'red'}; font-weight:bold;">{last['Change %']:.2f}%</div></div>""", unsafe_allow_html=True)
+        k2.markdown(f"""<div class="css-card" style="text-align:center;"><div style="font-size:14px; color:#A3AED0;">Net Foreign (Daily)</div><div style="font-size:24px; font-weight:700; color:#2B3674;">Rp {last['NFF (Rp)']/1e9:,.1f} M</div></div>""", unsafe_allow_html=True)
+        k3.markdown(f"""<div class="css-card" style="text-align:center;"><div style="font-size:14px; color:#A3AED0;">Money Flow Value</div><div style="font-size:24px; font-weight:700; color:#2B3674;">Rp {last['Money Flow Value']/1e9:,.1f} M</div></div>""", unsafe_allow_html=True)
+        k4.markdown(f"""<div class="css-card" style="text-align:center;"><div style="font-size:14px; color:#A3AED0;">Transaction Value</div><div style="font-size:24px; font-weight:700; color:#2B3674;">Rp {last['Value']/1e9:,.1f} M</div></div>""", unsafe_allow_html=True)
         
-        k2.markdown(f"""<div class="css-card" style="text-align:center;">
-            <div style="font-size:14px; color:#A3AED0;">Net Foreign (Daily)</div>
-            <div style="font-size:24px; font-weight:700; color:#2B3674;">Rp {last['NFF (Rp)']/1e9:,.1f} M</div>
-        </div>""", unsafe_allow_html=True)
-        
-        k3.markdown(f"""<div class="css-card" style="text-align:center;">
-            <div style="font-size:14px; color:#A3AED0;">Money Flow Value</div>
-            <div style="font-size:24px; font-weight:700; color:#2B3674;">Rp {last['Money Flow Value']/1e9:,.1f} M</div>
-        </div>""", unsafe_allow_html=True)
-        
-        k4.markdown(f"""<div class="css-card" style="text-align:center;">
-            <div style="font-size:14px; color:#A3AED0;">Transaction Value</div>
-            <div style="font-size:24px; font-weight:700; color:#2B3674;">Rp {last['Value']/1e9:,.1f} M</div>
-        </div>""", unsafe_allow_html=True)
-        
-        # Advanced Charts in Tabs
         st.markdown('<div class="css-card">', unsafe_allow_html=True)
         tab_c1, tab_c2 = st.tabs(["📉 Price & Flow Action", "🌊 Cumulative Foreign"])
-        
         with tab_c1:
             fig = make_subplots(rows=3, cols=1, shared_xaxes=True, row_heights=[0.5, 0.25, 0.25], vertical_spacing=0.05)
-            # Price
             fig.add_trace(go.Scatter(x=stock_df['Last Trading Date'], y=stock_df['Close'], name='Price', line=dict(color='#4318FF', width=2)), row=1, col=1)
-            # NFF
             colors_nff = ['#00C853' if v >= 0 else '#FF3D00' for v in stock_df['NFF (Rp)']]
             fig.add_trace(go.Bar(x=stock_df['Last Trading Date'], y=stock_df['NFF (Rp)'], name='Net Foreign', marker_color=colors_nff), row=2, col=1)
-            # Vol
             fig.add_trace(go.Bar(x=stock_df['Last Trading Date'], y=stock_df['Volume'], name='Volume', marker_color='#A3AED0'), row=3, col=1)
-            
             fig.update_layout(height=600, margin=dict(l=0,r=0,t=20,b=0), paper_bgcolor='white', plot_bgcolor='white')
             fig.update_xaxes(showgrid=True, gridcolor='#F4F7FE')
             fig.update_yaxes(showgrid=True, gridcolor='#F4F7FE')
             st.plotly_chart(fig, use_container_width=True)
-            
         with tab_c2:
             stock_df['Cum NFF'] = stock_df['NFF (Rp)'].cumsum()
             fig2 = px.area(stock_df, x='Last Trading Date', y='Cum NFF', title='Cumulative Foreign Flow (YTD)')
             fig2.update_layout(plot_bgcolor='white', font=dict(color='#2B3674'))
-            # Fix: use 'fillcolor' instead of 'fill_color' to avoid error
             fig2.update_traces(line_color='#4318FF', fillcolor='rgba(67, 24, 255, 0.1)')
             st.plotly_chart(fig2, use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
-# PAGE 3: TOP PICKS
+# PAGE 3: DATA EXPLORER (RESTORED)
+elif menu == "📋 Data Explorer":
+    st.markdown('<h2 style="color:#2B3674;">📋 Raw Data Filter</h2>', unsafe_allow_html=True)
+    st.markdown('<div class="css-card">', unsafe_allow_html=True)
+    selected_stocks_filter = st.multiselect("Filter Saham", sorted(df["Stock Code"].unique()))
+    df_filtered = df[df['Last Trading Date'].dt.date == sel_date].copy()
+    if selected_stocks_filter: df_filtered = df_filtered[df_filtered["Stock Code"].isin(selected_stocks_filter)]
+    st.dataframe(df_filtered, use_container_width=True, height=600)
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# PAGE 4: TOP PICKS
 elif menu == "🏆 Algorithmic Picks":
-    st.markdown(f"""
-    <div class="header-banner">
-        <div class="header-title">🏆 Top 20 Potential Stocks</div>
-        <div class="header-subtitle">Scoring based on Trend, Momentum, and Big Money Flow</div>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    col_run1, col_run2 = st.columns([1, 4])
-    with col_run1:
-        if st.button("🚀 Run Scoring Algorithm", type="primary"):
-            st.session_state['run_score'] = True
+    st.markdown(f"""<div class="header-banner"><div class="header-title">🏆 Top 20 Potential Stocks</div></div>""", unsafe_allow_html=True)
+    if st.button("🚀 Run Scoring Algorithm", type="primary"): st.session_state['run_score'] = True
     
     if st.session_state.get('run_score'):
         top20, msg, status = calculate_potential_score(df, pd.Timestamp(sel_date))
-        
         if not top20.empty:
-            # Layout: Leaderboard left, Details right
             col_res1, col_res2 = st.columns([2, 1])
-            
             with col_res1:
-                st.markdown('<div class="css-card">', unsafe_allow_html=True)
-                st.markdown('<div class="card-title">📋 Leaderboard</div>', unsafe_allow_html=True)
-                
-                # --- FIX: SELECT & RENAME COLUMNS FOR CLEAN DISPLAY ---
+                st.markdown('<div class="css-card"><div class="card-title">📋 Leaderboard</div>', unsafe_allow_html=True)
                 display_cols = ['Rank', 'Stock Code', 'last_price', 'total_net_ff_rp', 'total_money_flow', 'avg_change_pct', 'sector', 'Trend Score', 'Momentum Score', 'Potential Score']
-                
                 st.dataframe(
                     top20[display_cols],
                     column_config={
@@ -523,38 +540,85 @@ elif menu == "🏆 Algorithmic Picks":
                         "Momentum Score": st.column_config.NumberColumn("Momentum", format="%.1f"),
                         "Potential Score": st.column_config.ProgressColumn("Final Score", min_value=0, max_value=100, format="%.1f"),
                     },
-                    hide_index=True,
-                    use_container_width=True,
-                    height=600
+                    hide_index=True, use_container_width=True, height=600
                 )
                 st.markdown('</div>', unsafe_allow_html=True)
-                
             with col_res2:
-                # Top 1 Highlight
                 best = top20.iloc[0]
                 st.markdown('<div class="css-card">', unsafe_allow_html=True)
                 st.markdown(f'<div class="card-title">🥇 Top Pick: {best["Stock Code"]}</div>', unsafe_allow_html=True)
-                
-                # Radar Chart for Score Breakdown
                 categories = ['Trend', 'Momentum', 'NBSA', 'Foreign']
                 values = [best['Trend Score'], best['Momentum Score'], best['NBSA Score'], best['Foreign Contrib Score']]
-                
                 fig = px.line_polar(r=values, theta=categories, line_close=True)
                 fig.update_traces(fill='toself', line_color='#4318FF')
                 fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])), height=300, margin=dict(t=20, b=20))
                 st.plotly_chart(fig, use_container_width=True)
-                
                 st.metric("Total Score", f"{best['Potential Score']:.1f}")
                 st.metric("Last Price", f"Rp {best['last_price']:,.0f}")
                 st.markdown('</div>', unsafe_allow_html=True)
 
-# PAGE 4: PORTFOLIO
+# PAGE 5: FLOW ANALYSIS (RESTORED)
+elif menu == "🌊 Flow Analysis (NFF/MF)":
+    st.markdown('<h2 style="color:#2B3674;">🌊 Foreign & Money Flow Analysis</h2>', unsafe_allow_html=True)
+    st.markdown('<div class="css-card">', unsafe_allow_html=True)
+    
+    nff_res, mfv_res = calculate_flow_leaders(df, pd.Timestamp(sel_date))
+    
+    subtab1, subtab2 = st.tabs(["💰 Net Foreign Flow (NFF)", "💸 Money Flow Value (MFV)"])
+    
+    def show_flow_table(data_dict, col_name):
+        c1, c2, c3 = st.columns(3)
+        with c1: 
+            st.markdown("##### 📅 7 Days")
+            st.dataframe(data_dict['7D'].head(10), hide_index=True, use_container_width=True, column_config={col_name: st.column_config.NumberColumn(format="Rp %,d"), "Close": st.column_config.NumberColumn(format="Rp %,d")})
+        with c2: 
+            st.markdown("##### 📅 30 Days")
+            st.dataframe(data_dict['30D'].head(10), hide_index=True, use_container_width=True, column_config={col_name: st.column_config.NumberColumn(format="Rp %,d"), "Close": st.column_config.NumberColumn(format="Rp %,d")})
+        with c3: 
+            st.markdown("##### 📅 90 Days")
+            st.dataframe(data_dict['90D'].head(10), hide_index=True, use_container_width=True, column_config={col_name: st.column_config.NumberColumn(format="Rp %,d"), "Close": st.column_config.NumberColumn(format="Rp %,d")})
+
+    with subtab1: show_flow_table(nff_res, 'Total Net FF (Rp)')
+    with subtab2: show_flow_table(mfv_res, 'Total Money Flow (Rp)')
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# PAGE 6: BACKTEST SYSTEM (RESTORED)
+elif menu == "🧪 Backtest System":
+    st.markdown('<h2 style="color:#2B3674;">🧪 Strategy Backtester</h2>', unsafe_allow_html=True)
+    st.markdown('<div class="css-card">', unsafe_allow_html=True)
+    days_test = st.slider("Lookback Days", 7, 90, 30)
+    if st.button("🚀 Run Backtest"):
+        with st.spinner("Simulating..."):
+            df_bt = run_backtest_analysis(df, days_back=days_test)
+            if not df_bt.empty:
+                win_rate = (len(df_bt[df_bt['Return (%)'] > 0]) / len(df_bt)) * 100
+                avg_ret = df_bt['Return (%)'].mean()
+                
+                m1, m2, m3 = st.columns(3)
+                m1.metric("Total Signals", len(df_bt))
+                m2.metric("Win Rate", f"{win_rate:.1f}%")
+                m3.metric("Avg Return", f"{avg_ret:.2f}%", delta_color="normal" if avg_ret > 0 else "inverse")
+                
+                st.markdown("#### 📜 Signal Log")
+                st.dataframe(
+                    df_bt.sort_values('Signal Date', ascending=False),
+                    hide_index=True, use_container_width=True,
+                    column_config={
+                        "Signal Date": st.column_config.DateColumn("Date", format="DD MMM YYYY"),
+                        "Entry Price": st.column_config.NumberColumn(format="Rp %,d"),
+                        "Current Price": st.column_config.NumberColumn(format="Rp %,d"),
+                        "Return (%)": st.column_config.NumberColumn(format="%.2f %%"),
+                        "Score": st.column_config.NumberColumn(format="%.1f")
+                    }
+                )
+            else: st.warning("No signals found in this period.")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# PAGE 7: PORTFOLIO
 elif menu == "💼 Portfolio Simulator":
     st.markdown('<h2 style="color:#2B3674;">💼 Portfolio Backtest Simulator</h2>', unsafe_allow_html=True)
-    
     st.markdown('<div class="css-card">', unsafe_allow_html=True)
     avail_dates = sorted(df['Last Trading Date'].unique())
-    
     c1, c2, c3, c4 = st.columns(4)
     with c1: start_d = st.selectbox("📅 Tanggal Beli", avail_dates, index=max(0, len(avail_dates)-31), format_func=lambda x: pd.Timestamp(x).strftime('%d-%m-%Y'))
     with c2: end_d = st.selectbox("📅 Tanggal Jual", avail_dates, index=len(avail_dates)-1, format_func=lambda x: pd.Timestamp(x).strftime('%d-%m-%Y'))
@@ -563,39 +627,23 @@ elif menu == "💼 Portfolio Simulator":
         st.write("") 
         st.write("")
         sim_btn = st.button("🚀 Mulai Simulasi", type="primary")
-    st.markdown('</div>', unsafe_allow_html=True)
     
     if sim_btn:
         if pd.Timestamp(start_d) >= pd.Timestamp(end_d): st.error("Tanggal Jual harus setelah Beli.")
         else:
             with st.spinner("Menghitung PnL..."):
                 df_port, sum_port, msg = simulate_portfolio_range(df, cap, pd.Timestamp(start_d), pd.Timestamp(end_d))
-                
                 if msg == "success":
-                    # Result Cards
                     r1, r2, r3 = st.columns(3)
                     r1.markdown(f"""<div class="css-card"><div style="color:#A3AED0;">Final Value</div><div style="font-size:24px; font-weight:bold; color:#2B3674;">Rp {sum_port['Final Portfolio Value']:,.0f}</div></div>""", unsafe_allow_html=True)
                     r2.markdown(f"""<div class="css-card"><div style="color:#A3AED0;">Net Profit</div><div style="font-size:24px; font-weight:bold; color:{'green' if sum_port['Net Profit']>0 else 'red'};">Rp {sum_port['Net Profit']:,.0f}</div></div>""", unsafe_allow_html=True)
                     r3.markdown(f"""<div class="css-card"><div style="color:#A3AED0;">ROI</div><div style="font-size:24px; font-weight:bold; color:#4318FF;">{sum_port['Total ROI']:.2f}%</div></div>""", unsafe_allow_html=True)
-                    
-                    st.markdown('<div class="css-card">', unsafe_allow_html=True)
-                    st.dataframe(
-                        df_port[['Stock Code', 'Sector', 'Buy Price', 'Sell Price', 'Gain/Loss (Rp)', 'ROI (%)']], 
-                        use_container_width=True,
-                        column_config={
-                            "Buy Price": st.column_config.NumberColumn(format="Rp %,d"),
-                            "Sell Price": st.column_config.NumberColumn(format="Rp %,d"),
-                            "Gain/Loss (Rp)": st.column_config.NumberColumn(format="Rp %,d"),
-                            "ROI (%)": st.column_config.NumberColumn(format="%.2f %%")
-                        }
-                    )
-                    st.markdown('</div>', unsafe_allow_html=True)
+                    st.dataframe(df_port[['Stock Code', 'Sector', 'Buy Price', 'Sell Price', 'Gain/Loss (Rp)', 'ROI (%)']], use_container_width=True, column_config={"Buy Price": st.column_config.NumberColumn(format="Rp %,d"), "Sell Price": st.column_config.NumberColumn(format="Rp %,d"), "Gain/Loss (Rp)": st.column_config.NumberColumn(format="Rp %,d"), "ROI (%)": st.column_config.NumberColumn(format="%.2f %%")})
+    st.markdown('</div>', unsafe_allow_html=True)
 
-# PAGE 5: MSCI
+# PAGE 8: MSCI
 elif menu == "🌏 MSCI Projector":
     st.markdown('<h2 style="color:#2B3674;">🌏 MSCI Indonesia Proxy</h2>', unsafe_allow_html=True)
-    st.info("Prediksi kandidat masuk indeks MSCI berdasarkan Float Market Cap & Likuiditas (ATVR).")
-    
     st.markdown('<div class="css-card">', unsafe_allow_html=True)
     col_in1, col_in2 = st.columns(2)
     with col_in1: usd = st.number_input("Kurs USD/IDR", value=16200, step=50)
@@ -606,24 +654,15 @@ elif menu == "🌏 MSCI Projector":
     
     if calc_btn:
         df_msci = calculate_msci_projection_v2(df, df['Last Trading Date'].max(), usd)
-        
-        # Categorization logic inline
         def cat_msci(r):
             if r['Float Cap ($B)'] >= 1.5 and r['ATVR 12M (%)'] >= 15: return "✅ Potential Standard"
             elif r['Float Cap ($B)'] >= 1.5: return "⚠️ Illiquid (Risk)"
             elif r['Float Cap ($B)'] >= 0.8: return "🔹 Small Cap"
             else: return "🔻 Micro"
-        
         df_msci['Status'] = df_msci.apply(cat_msci, axis=1)
         
-        # Scatter Plot
         st.markdown('<div class="css-card">', unsafe_allow_html=True)
-        fig = px.scatter(
-            df_msci.head(100), 
-            x="ATVR 12M (%)", y="Float Cap ($B)", 
-            color="Status", size="Full Cap ($B)", hover_name="Stock Code",
-            color_discrete_map={"✅ Potential Standard": "#00C853", "⚠️ Illiquid (Risk)": "#FF3D00", "🔹 Small Cap": "#2962FF", "🔻 Micro": "#B0BEC5"}
-        )
+        fig = px.scatter(df_msci.head(100), x="ATVR 12M (%)", y="Float Cap ($B)", color="Status", size="Full Cap ($B)", hover_name="Stock Code", color_discrete_map={"✅ Potential Standard": "#00C853", "⚠️ Illiquid (Risk)": "#FF3D00", "🔹 Small Cap": "#2962FF", "🔻 Micro": "#B0BEC5"})
         fig.add_hline(y=1.5, line_dash="dash", annotation_text="Standard Threshold ($1.5B)")
         fig.add_vline(x=15, line_dash="dash", annotation_text="Liquidity (15%)")
         fig.update_layout(paper_bgcolor='white', plot_bgcolor='white')
@@ -632,16 +671,9 @@ elif menu == "🌏 MSCI Projector":
         
         st.markdown('<div class="css-card">', unsafe_allow_html=True)
         st.markdown("#### 📋 Candidate List")
-        st.dataframe(
-            df_msci[df_msci['Status'] == "✅ Potential Standard"][['Stock Code', 'Status', 'Float Cap ($B)', 'ATVR 12M (%)']], 
-            use_container_width=True,
-            column_config={
-                "Float Cap ($B)": st.column_config.NumberColumn(format="$ %.2f B"), 
-                "ATVR 12M (%)": st.column_config.NumberColumn(format="%.2f %%")
-            }
-        )
+        st.dataframe(df_msci[df_msci['Status'] == "✅ Potential Standard"][['Stock Code', 'Status', 'Float Cap ($B)', 'ATVR 12M (%)']], use_container_width=True, column_config={"Float Cap ($B)": st.column_config.NumberColumn(format="$ %.2f B"), "ATVR 12M (%)": st.column_config.NumberColumn(format="%.2f %%")})
         st.markdown('</div>', unsafe_allow_html=True)
 
 # --- FOOTER ---
 st.markdown("---")
-st.markdown("<center style='color:#A3AED0;'> IDX Quant Pro v2.0 • Powered by Streamlit </center>", unsafe_allow_html=True)
+st.markdown("<center style='color:#A3AED0;'> IDX Quant Pro v2.1 • Powered by Streamlit </center>", unsafe_allow_html=True)
