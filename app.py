@@ -1,5 +1,5 @@
 # ==============================================================================
-# 📦 1) IMPORTS & CONFIG
+# 📦 1) IMPORTS
 # ==============================================================================
 import streamlit as st
 import pandas as pd
@@ -9,100 +9,118 @@ from plotly.subplots import make_subplots
 import numpy as np
 import io
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 
 # Google Drive imports
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 
-# --- PAGE CONFIGURATION ---
+# ==============================================================================
+# ⚙️ 2) CONFIG & MODERN UI STYLING
+# ==============================================================================
 st.set_page_config(
-    page_title="IDX Quant Dashboard Pro",
+    page_title="IDX Quant Pro",
     layout="wide",
-    page_icon="🚀",
+    page_icon="💎",
     initial_sidebar_state="expanded"
 )
 
-# --- 🎨 MODERN UI STYLING (CUSTOM CSS) ---
+# --- MDM STYLE CSS (Light, Clean, Purple Gradient) ---
 st.markdown("""
 <style>
-    /* 1. Global Theme */
+    /* 1. Global Variables */
+    :root {
+        --primary-color: #4318FF;
+        --background-light: #F4F7FE;
+        --card-white: #FFFFFF;
+        --text-dark: #2B3674;
+        --text-grey: #A3AED0;
+    }
+
+    /* 2. Main Background */
     .stApp {
-        background-color: #0E1117;
-        color: #FAFAFA;
-        font-family: 'Inter', sans-serif;
+        background-color: var(--background-light);
+        color: var(--text-dark);
+        font-family: 'DM Sans', sans-serif;
     }
-    
-    /* 2. Sidebar */
+
+    /* 3. Sidebar Styling */
     [data-testid="stSidebar"] {
-        background-color: #161B22;
-        border-right: 1px solid #30363D;
+        background-color: var(--card-white);
+        box-shadow: 14px 14px 40px rgba(112, 144, 176, 0.08);
+        border-right: none;
     }
     
-    /* 3. Metric Cards (KPIs) */
-    div[data-testid="metric-container"] {
-        background-color: #1E232B;
-        border: 1px solid #30363D;
-        padding: 15px;
-        border-radius: 10px;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
-        transition: transform 0.2s;
-    }
-    div[data-testid="metric-container"]:hover {
-        transform: translateY(-2px);
-        border-color: #58A6FF;
-    }
-    
-    /* 4. Custom Containers/Cards */
+    /* 4. Card Container Styling */
     .css-card {
-        background-color: #1E232B;
-        border-radius: 10px;
-        padding: 20px;
-        margin-bottom: 20px;
-        border: 1px solid #30363D;
+        background-color: var(--card-white);
+        border-radius: 20px;
+        padding: 24px;
+        box-shadow: 0px 18px 40px rgba(112, 144, 176, 0.12);
+        margin-bottom: 24px;
     }
     
-    /* 5. Headers & Text */
-    h1, h2, h3 {
-        color: #58A6FF !important;
-        font-weight: 700;
-    }
-    .stCaption {
-        color: #8B949E;
-    }
-    
-    /* 6. Tables */
-    [data-testid="stDataFrame"] {
-        border: 1px solid #30363D;
-        border-radius: 5px;
-    }
-    
-    /* 7. Tabs */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 8px;
-        background-color: transparent;
-    }
-    .stTabs [data-baseweb="tab"] {
-        background-color: #161B22;
-        border-radius: 4px;
-        color: #8B949E;
-        border: 1px solid #30363D;
-        padding: 8px 16px;
-    }
-    .stTabs [data-baseweb="tab"][aria-selected="true"] {
-        background-color: #238636;
+    /* 5. Header Gradient Banner */
+    .header-banner {
+        background: linear-gradient(86.88deg, #4318FF 0%, #868CFF 100%);
+        border-radius: 20px;
+        padding: 30px 40px;
         color: white;
-        border-color: #238636;
+        margin-bottom: 30px;
+        box-shadow: 0px 18px 40px rgba(112, 144, 176, 0.2);
+    }
+    .header-title { font-size: 32px; font-weight: 700; margin-bottom: 8px; }
+    .header-subtitle { font-size: 16px; font-weight: 500; opacity: 0.9; }
+
+    /* 6. Metrics Styling */
+    div[data-testid="stMetricValue"] {
+        color: var(--text-dark) !important;
+        font-weight: 700;
+        font-size: 28px;
+    }
+    div[data-testid="stMetricLabel"] {
+        color: var(--text-grey) !important;
+        font-size: 14px;
+        font-weight: 500;
+    }
+
+    /* 7. Buttons */
+    div.stButton > button {
+        background: linear-gradient(90deg, #4318FF 0%, #868CFF 100%);
+        color: white;
+        border: none;
+        border-radius: 12px;
+        padding: 0.5rem 1rem;
+        font-weight: bold;
+        box-shadow: 0px 4px 10px rgba(67, 24, 255, 0.2);
+        width: 100%;
+    }
+    div.stButton > button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0px 8px 15px rgba(67, 24, 255, 0.3);
+        color: white;
+    }
+
+    /* 8. Text & Headers */
+    h1, h2, h3, h4, h5 {
+        color: var(--text-dark) !important;
+    }
+    
+    /* Custom Card Title Helper */
+    .card-title {
+        font-size: 20px;
+        font-weight: 700;
+        color: var(--text-dark);
+        margin-bottom: 20px;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# --- CONSTANTS ---
+# --- CONSTANTS & LOGIC WEIGHTS ---
 FOLDER_ID = "1hX2jwUrAgi4Fr8xkcFWjCW6vbk6lsIlP" 
 FILE_NAME = "Kompilasi_Data_1Tahun.csv"
 
-# Logic Weights (Preserved)
 W = dict(
     trend_akum=0.40, trend_ff=0.30, trend_mfv=0.20, trend_mom=0.10,
     mom_price=0.40,  mom_vol=0.25,  mom_akum=0.25,  mom_ff=0.10,
@@ -110,7 +128,7 @@ W = dict(
 )
 
 # ==============================================================================
-# 📦 2) DATA LOADER (PRESERVED LOGIC)
+# 📦 3) DATA LOADER
 # ==============================================================================
 def get_gdrive_service():
     try:
@@ -119,7 +137,7 @@ def get_gdrive_service():
         service = build('drive', 'v3', credentials=creds, cache_discovery=False)
         return service, None
     except KeyError:
-        return None, "❌ Key [gcp_service_account] missing in secrets.toml."
+        return None, "❌ Key [gcp_service_account] missing in secrets."
     except Exception as e:
         return None, f"❌ Auth Error: {e}"
 
@@ -181,7 +199,7 @@ def load_data():
         return pd.DataFrame(), f"❌ Data Load Error: {e}", "error"
 
 # ==============================================================================
-# 🧠 3) ANALYTICS ENGINE (SCORING & METRICS)
+# 🧠 4) ANALYTICS ENGINE
 # ==============================================================================
 def pct_rank(s: pd.Series):
     s = pd.to_numeric(s, errors="coerce")
@@ -201,7 +219,6 @@ def calculate_potential_score(df, latest_date):
     df_historic = df[df['Last Trading Date'] <= latest_date]
     trend_df = df_historic[df_historic['Last Trading Date'] >= trend_start]
     mom_df = df_historic[df_historic['Last Trading Date'] >= mom_start]
-    last_df = df_historic[df_historic['Last Trading Date'] == latest_date]
 
     if trend_df.empty: return pd.DataFrame(), "Insufficient Data", "warning"
 
@@ -214,7 +231,7 @@ def calculate_potential_score(df, latest_date):
         sector=('Sector', 'last')
     ).reset_index()
     
-    # Simple accumulation proxy if 'Final Signal' missing
+    # Proxy Logic
     tr['Trend Score'] = (pct_rank(tr['total_net_ff_rp']) * 0.4 + 
                          pct_rank(tr['total_money_flow']) * 0.3 + 
                          pct_rank(tr['avg_change_pct']) * 0.3)
@@ -239,243 +256,343 @@ def calculate_potential_score(df, latest_date):
     return top20, "Scored", "success"
 
 @st.cache_data(ttl=3600)
-def calculate_flow_leaders(df, max_date, period_days):
-    start_date = max_date - pd.Timedelta(days=period_days)
-    df_period = df[df['Last Trading Date'] >= start_date]
-    
-    agg = df_period.groupby('Stock Code').agg({
-        'NFF (Rp)': 'sum',
-        'Money Flow Value': 'sum',
-        'Close': 'last',
-        'Sector': 'last'
-    }).reset_index()
-    
-    return agg.sort_values('NFF (Rp)', ascending=False).head(10)
-
-# --- BACKTEST & PORTFOLIO (SIMPLIFIED FOR UI) ---
-def run_simple_backtest(df, days=30):
-    # (Simplified logic for cleaner display)
-    return pd.DataFrame({'Stock': ['BBCA', 'BMRI'], 'Return': [5.2, 3.1]}) 
-
-def simulate_portfolio(df, capital, start, end):
-    # (Placeholder wrapper for existing logic to keep UI code clean)
-    return pd.DataFrame(), {'Net Profit': 0, 'Total ROI': 0}, "success"
-
-# --- MSCI PROXY ---
-@st.cache_data(ttl=3600)
-def get_msci_candidates(df, latest_date, usd_rate):
-    # Same logic as before
+def calculate_msci_projection_v2(df, latest_date, usd_rate):
     start_12m = latest_date - pd.Timedelta(days=365)
+    start_3m = latest_date - pd.Timedelta(days=90)
+    
     df_12m = df[(df['Last Trading Date'] >= start_12m) & (df['Last Trading Date'] <= latest_date)]
+    df_3m = df[(df['Last Trading Date'] >= start_3m) & (df['Last Trading Date'] <= latest_date)]
     df_last = df[df['Last Trading Date'] == latest_date].copy()
     
     results = []
     for _, row in df_last.iterrows():
         code = row['Stock Code']
         val_12m = df_12m[df_12m['Stock Code'] == code]['Value'].sum()
-        float_cap_idr = (row['Close'] * row.get('Listed Shares', 0) * row.get('Free Float', 0)/100)
+        val_3m = df_3m[df_3m['Stock Code'] == code]['Value'].sum()
         
-        atvr = (val_12m / float_cap_idr * 100) if float_cap_idr > 0 else 0
-        float_cap_usd = float_cap_idr / usd_rate / 1e9
+        float_mcap_idr_t = (row['Close'] * row.get('Listed Shares', 0) * row.get('Free Float', 0)/100) / 1e12
+        full_mcap_usd_b = (row['Close'] * row.get('Listed Shares', 0)) / usd_rate / 1e9
+        float_mcap_usd_b = (float_mcap_idr_t * 1e12) / usd_rate / 1e9
         
+        float_mcap_full = float_mcap_idr_t * 1e12
+        atvr_12m = (val_12m / float_mcap_full * 100) if float_mcap_full > 0 else 0
+        atvr_3m = ((val_3m * 4) / float_mcap_full * 100) if float_mcap_full > 0 else 0
+            
         results.append({
-            'Stock Code': code,
-            'Sector': row['Sector'],
-            'Float Cap ($B)': float_cap_usd,
-            'ATVR 12M (%)': atvr,
-            'Status': 'Potential' if (float_cap_usd > 1.5 and atvr > 15) else 'Watchlist'
+            'Stock Code': code, 'Sector': row['Sector'],
+            'Float Cap (IDR T)': float_mcap_idr_t,
+            'Full Cap ($B)': full_mcap_usd_b,
+            'Float Cap ($B)': float_mcap_usd_b,
+            'ATVR 12M (%)': atvr_12m, 'ATVR 3M (%)': atvr_3m
         })
-    return pd.DataFrame(results).sort_values('Float Cap ($B)', ascending=False)
+        
+    df_msci = pd.DataFrame(results).sort_values(by='Float Cap ($B)', ascending=False)
+    return df_msci
 
 # ==============================================================================
-# 🎨 4) DASHBOARD UI LAYOUT
+# 🎨 5) MAIN LAYOUT & UI
 # ==============================================================================
 
 # --- LOAD DATA ---
 df, msg, status = load_data()
 if status == "error": st.error(msg); st.stop()
 
-# --- SIDEBAR NAV ---
+# --- SIDEBAR (Clean White) ---
 with st.sidebar:
-    st.title("🚀 IDX Quant Pro")
-    st.caption(f"Data Date: {df['Last Trading Date'].max().date()}")
+    st.image("https://cdn-icons-png.flaticon.com/512/2910/2910312.png", width=50)
+    st.markdown("<h3 style='color:#2B3674; margin-top:0;'>IDX Quant Pro</h3>", unsafe_allow_html=True)
+    st.markdown("<div style='color:#A3AED0; font-size:12px; margin-bottom:20px;'>Advanced Stock Analytics</div>", unsafe_allow_html=True)
     
-    menu = st.radio("Navigation", [
+    menu = st.radio("MAIN MENU", [
         "📊 Market Dashboard", 
-        "🔍 Deep Analysis", 
-        "🏆 Top Picks (Scoring)", 
-        "💼 Portfolio Sim", 
-        "🌏 MSCI Radar"
+        "🔍 Deep Dive Analysis", 
+        "🏆 Algorithmic Picks", 
+        "💼 Portfolio Simulator", 
+        "🌏 MSCI Projector"
     ])
     
     st.divider()
-    if st.button("Refresh Data", use_container_width=True):
+    
+    # Global Date Filter
+    st.markdown("<b>📅 Data Filter</b>", unsafe_allow_html=True)
+    max_date = df['Last Trading Date'].max().date()
+    sel_date = st.date_input("Select Date", max_date, min_value=df['Last Trading Date'].min().date(), max_value=max_date)
+    
+    st.divider()
+    if st.button("🔄 Refresh System"):
         st.cache_data.clear()
         st.rerun()
 
-# --- PAGE 1: MARKET DASHBOARD ---
+# --- MAIN CONTENT AREA ---
+
+# PAGE 1: DASHBOARD
 if menu == "📊 Market Dashboard":
-    st.markdown("## 📊 Market Overview")
+    # 1. Header Banner
+    st.markdown(f"""
+    <div class="header-banner">
+        <div class="header-title">Welcome, Stock Analyzers! 👋</div>
+        <div class="header-subtitle">Market Overview for {sel_date.strftime('%d %B %Y')}</div>
+    </div>
+    """, unsafe_allow_html=True)
     
-    # Date Filter
-    max_date = df['Last Trading Date'].max().date()
-    sel_date = st.date_input("Select Date", max_date, max_value=max_date)
-    day_df = df[df['Last Trading Date'].dt.date == sel_date]
+    df_day = df[df['Last Trading Date'].dt.date == sel_date]
     
-    # 1. Top Metrics (Cards)
-    m1, m2, m3, m4 = st.columns(4)
-    with m1: st.metric("Traded Value", f"Rp {day_df['Value'].sum()/1e12:.2f} T", delta="Daily Volume")
-    with m2: st.metric("Active Stocks", f"{len(day_df)}")
-    with m3: st.metric("Unusual Vol", f"{day_df['Unusual Volume'].sum()}")
-    with m4: st.metric("Foreign Net", f"Rp {day_df['NFF (Rp)'].sum()/1e9:.1f} M")
+    # 2. Key Metrics Row (Card Style)
+    col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+    with col_m1:
+        st.markdown("""<div class="css-card">""", unsafe_allow_html=True)
+        st.metric("Total Transaksi", f"Rp {df_day['Value'].sum()/1e12:.2f} T")
+        st.markdown("</div>", unsafe_allow_html=True)
+    with col_m2:
+        st.markdown("""<div class="css-card">""", unsafe_allow_html=True)
+        st.metric("Saham Aktif", f"{len(df_day)}")
+        st.markdown("</div>", unsafe_allow_html=True)
+    with col_m3:
+        st.markdown("""<div class="css-card">""", unsafe_allow_html=True)
+        st.metric("Unusual Vol", f"{df_day['Unusual Volume'].sum()}")
+        st.markdown("</div>", unsafe_allow_html=True)
+    with col_m4:
+        st.markdown("""<div class="css-card">""", unsafe_allow_html=True)
+        net_foreign = df_day['NFF (Rp)'].sum()
+        st.metric("Net Foreign", f"Rp {net_foreign/1e9:.1f} M", delta_color="normal" if net_foreign > 0 else "inverse")
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    # 3. Market Map & Tables
+    col_c1, col_c2 = st.columns([2, 1])
     
-    # 2. Charts Row
-    c1, c2 = st.columns([2, 1])
-    with c1:
-        # Treemap Sector
-        if 'Sector' in day_df.columns:
-            sec_agg = day_df.groupby('Sector')['Value'].sum().reset_index()
-            fig = px.treemap(sec_agg, path=['Sector'], values='Value', title='Market Map by Value', color_discrete_sequence=px.colors.sequential.RdBu)
-            fig.update_layout(margin=dict(t=30, l=10, r=10, b=10))
+    with col_c1:
+        st.markdown('<div class="css-card">', unsafe_allow_html=True)
+        st.markdown('<div class="card-title">🗺️ Sector Market Map</div>', unsafe_allow_html=True)
+        if 'Sector' in df_day.columns:
+            sec_agg = df_day.groupby('Sector')['Value'].sum().reset_index()
+            fig = px.treemap(sec_agg, path=['Sector'], values='Value', color='Value', color_continuous_scale='Blues')
+            fig.update_layout(margin=dict(t=0, l=0, r=0, b=0), height=400)
+            st.plotly_chart(fig, use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+    with col_c2:
+        st.markdown('<div class="css-card">', unsafe_allow_html=True)
+        st.markdown('<div class="card-title">🚀 Top Gainers</div>', unsafe_allow_html=True)
+        gainers = df_day.nlargest(10, 'Change %')[['Stock Code', 'Close', 'Change %']]
+        st.dataframe(
+            gainers, 
+            hide_index=True, 
+            use_container_width=True,
+            column_config={
+                "Close": st.column_config.NumberColumn(format="Rp %d"),
+                "Change %": st.column_config.NumberColumn(format="%.2f %%")
+            },
+            height=400
+        )
+        st.markdown('</div>', unsafe_allow_html=True)
+
+# PAGE 2: DEEP DIVE
+elif menu == "🔍 Deep Dive Analysis":
+    st.markdown('<h2 style="color:#2B3674;">🔍 Individual Stock Scanner</h2>', unsafe_allow_html=True)
+    
+    # Filter Bar (White Card)
+    st.markdown('<div class="css-card">', unsafe_allow_html=True)
+    stocks = sorted(df['Stock Code'].unique())
+    col_s1, col_s2 = st.columns([3, 1])
+    with col_s1:
+        sel_stock = st.selectbox("Cari Kode Saham:", stocks, index=stocks.index('BBRI') if 'BBRI' in stocks else 0)
+    with col_s2:
+        st.write("") # Spacer
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Process Data
+    stock_df = df[df['Stock Code'] == sel_stock].sort_values('Last Trading Date')
+    if not stock_df.empty:
+        last = stock_df.iloc[-1]
+        
+        # KPI Row
+        k1, k2, k3, k4 = st.columns(4)
+        k1.markdown(f"""<div class="css-card" style="text-align:center;">
+            <div style="font-size:14px; color:#A3AED0;">Harga Terakhir</div>
+            <div style="font-size:24px; font-weight:700; color:#2B3674;">Rp {last['Close']:,.0f}</div>
+            <div style="color:{'green' if last['Change %']>0 else 'red'}; font-weight:bold;">{last['Change %']:.2f}%</div>
+        </div>""", unsafe_allow_html=True)
+        
+        k2.markdown(f"""<div class="css-card" style="text-align:center;">
+            <div style="font-size:14px; color:#A3AED0;">Net Foreign (Daily)</div>
+            <div style="font-size:24px; font-weight:700; color:#2B3674;">Rp {last['NFF (Rp)']/1e9:.1f} M</div>
+        </div>""", unsafe_allow_html=True)
+        
+        k3.markdown(f"""<div class="css-card" style="text-align:center;">
+            <div style="font-size:14px; color:#A3AED0;">Money Flow Value</div>
+            <div style="font-size:24px; font-weight:700; color:#2B3674;">Rp {last['Money Flow Value']/1e9:.1f} M</div>
+        </div>""", unsafe_allow_html=True)
+        
+        k4.markdown(f"""<div class="css-card" style="text-align:center;">
+            <div style="font-size:14px; color:#A3AED0;">Transaction Value</div>
+            <div style="font-size:24px; font-weight:700; color:#2B3674;">Rp {last['Value']/1e9:.1f} M</div>
+        </div>""", unsafe_allow_html=True)
+        
+        # Advanced Charts in Tabs
+        st.markdown('<div class="css-card">', unsafe_allow_html=True)
+        tab_c1, tab_c2 = st.tabs(["📉 Price & Flow Action", "🌊 Cumulative Foreign"])
+        
+        with tab_c1:
+            fig = make_subplots(rows=3, cols=1, shared_xaxes=True, row_heights=[0.5, 0.25, 0.25], vertical_spacing=0.05)
+            # Price
+            fig.add_trace(go.Scatter(x=stock_df['Last Trading Date'], y=stock_df['Close'], name='Price', line=dict(color='#4318FF', width=2)), row=1, col=1)
+            # NFF
+            colors_nff = ['#00C853' if v >= 0 else '#FF3D00' for v in stock_df['NFF (Rp)']]
+            fig.add_trace(go.Bar(x=stock_df['Last Trading Date'], y=stock_df['NFF (Rp)'], name='Net Foreign', marker_color=colors_nff), row=2, col=1)
+            # Vol
+            fig.add_trace(go.Bar(x=stock_df['Last Trading Date'], y=stock_df['Volume'], name='Volume', marker_color='#A3AED0'), row=3, col=1)
+            
+            fig.update_layout(height=600, margin=dict(l=0,r=0,t=20,b=0), paper_bgcolor='white', plot_bgcolor='white')
+            fig.update_xaxes(showgrid=True, gridcolor='#F4F7FE')
+            fig.update_yaxes(showgrid=True, gridcolor='#F4F7FE')
             st.plotly_chart(fig, use_container_width=True)
             
-    with c2:
-        # Top Gainers Table
-        st.markdown("##### 🚀 Top Gainers")
-        gainers = day_df.nlargest(8, 'Change %')[['Stock Code', 'Close', 'Change %']]
-        st.dataframe(gainers, hide_index=True, use_container_width=True, 
-                     column_config={"Change %": st.column_config.NumberColumn(format="%.2f %%")})
+        with tab_c2:
+            stock_df['Cum NFF'] = stock_df['NFF (Rp)'].cumsum()
+            fig2 = px.area(stock_df, x='Last Trading Date', y='Cum NFF', title='Cumulative Foreign Flow (YTD)')
+            fig2.update_layout(plot_bgcolor='white', font=dict(color='#2B3674'))
+            fig2.update_traces(line_color='#4318FF', fill_color='rgba(67, 24, 255, 0.1)')
+            st.plotly_chart(fig2, use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
 
-# --- PAGE 2: DEEP ANALYSIS (ENHANCED) ---
-elif menu == "🔍 Deep Analysis":
-    st.markdown("## 🔍 Deep Dive Analysis")
+# PAGE 3: TOP PICKS
+elif menu == "🏆 Algorithmic Picks":
+    st.markdown(f"""
+    <div class="header-banner">
+        <div class="header-title">🏆 Top 20 Potential Stocks</div>
+        <div class="header-subtitle">Scoring based on Trend, Momentum, and Big Money Flow</div>
+    </div>
+    """, unsafe_allow_html=True)
     
-    stocks = sorted(df['Stock Code'].unique())
-    sel_stock = st.selectbox("Select Stock Ticker", stocks, index=stocks.index('BBRI') if 'BBRI' in stocks else 0)
+    col_run1, col_run2 = st.columns([1, 4])
+    with col_run1:
+        if st.button("🚀 Run Scoring Algorithm", type="primary"):
+            st.session_state['run_score'] = True
     
-    stock_df = df[df['Stock Code'] == sel_stock].sort_values('Last Trading Date')
-    last = stock_df.iloc[-1]
-    
-    # 1. Stock Header
-    h1, h2, h3, h4 = st.columns(4)
-    h1.metric("Close Price", f"Rp {last['Close']:,.0f}", f"{last['Change %']:.2f}%")
-    h2.metric("Net Foreign (Daily)", f"Rp {last['NFF (Rp)']/1e9:.1f} M")
-    h3.metric("Money Flow", f"Rp {last['Money Flow Value']/1e9:.1f} M")
-    h4.metric("RSI / Tech", "Neutral") # Placeholder for tech signal
-    
-    # 2. Interactive Main Chart
-    tab_c1, tab_c2 = st.tabs(["Price & Flow", "Foreign Cumulative"])
-    
-    with tab_c1:
-        fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.7, 0.3], vertical_spacing=0.05)
-        # Price (Candle/Line)
-        fig.add_trace(go.Scatter(x=stock_df['Last Trading Date'], y=stock_df['Close'], name='Price', line=dict(color='#58A6FF', width=2)), row=1, col=1)
-        # Flow Bar
-        colors = ['#238636' if v > 0 else '#DA3633' for v in stock_df['NFF (Rp)']]
-        fig.add_trace(go.Bar(x=stock_df['Last Trading Date'], y=stock_df['NFF (Rp)'], name='Net Foreign', marker_color=colors), row=2, col=1)
-        fig.update_layout(height=500, template="plotly_dark", margin=dict(l=0,r=0,t=30,b=0))
-        st.plotly_chart(fig, use_container_width=True)
+    if st.session_state.get('run_score'):
+        top20, msg, status = calculate_potential_score(df, pd.Timestamp(sel_date))
         
-    with tab_c2:
-        stock_df['Cum NFF'] = stock_df['NFF (Rp)'].cumsum()
-        fig2 = px.area(stock_df, x='Last Trading Date', y='Cum NFF', title='Cumulative Foreign Flow (YTD)')
-        fig2.update_layout(template="plotly_dark")
-        st.plotly_chart(fig2, use_container_width=True)
-
-# --- PAGE 3: TOP PICKS ---
-elif menu == "🏆 Top Picks (Scoring)":
-    st.markdown("## 🏆 Algorithmic Top Picks")
-    st.caption("Ranking based on Trend, Momentum, and Institutional Accumulation.")
-    
-    date_run = st.date_input("Run Analysis For", df['Last Trading Date'].max().date())
-    
-    if st.button("🚀 Run Algorithm", type="primary"):
-        with st.spinner("Crunching numbers..."):
-            top20, msg, _ = calculate_potential_score(df, pd.Timestamp(date_run))
+        if not top20.empty:
+            # Layout: Leaderboard left, Details right
+            col_res1, col_res2 = st.columns([2, 1])
             
-            if not top20.empty:
-                # 1. Radar Chart of Top Stock
-                c_left, c_right = st.columns([1, 2])
+            with col_res1:
+                st.markdown('<div class="css-card">', unsafe_allow_html=True)
+                st.markdown('<div class="card-title">📋 Leaderboard</div>', unsafe_allow_html=True)
+                st.dataframe(
+                    top20,
+                    column_config={
+                        "Potential Score": st.column_config.ProgressColumn("Score", min_value=0, max_value=100, format="%.1f"),
+                        "last_price": st.column_config.NumberColumn("Close", format="Rp %d"),
+                        "last_final_signal": "Signal"
+                    },
+                    hide_index=True,
+                    use_container_width=True,
+                    height=600
+                )
+                st.markdown('</div>', unsafe_allow_html=True)
                 
-                with c_left:
-                    st.markdown("### 🥇 #1 Potential Stock")
-                    best = top20.iloc[0]
-                    st.metric(best['Stock Code'], f"Score: {best['Potential Score']:.1f}")
-                    
-                    # Radar Data (Mockup for visuals)
-                    r_df = pd.DataFrame(dict(
-                        r=[best['Trend Score'], best['Momentum Score'], 80, 70, 60],
-                        theta=['Trend','Momentum','Volume','Foreign','Sector']
-                    ))
-                    fig = px.line_polar(r_df, r='r', theta='theta', line_close=True)
-                    fig.update_traces(fill='toself')
-                    st.plotly_chart(fig, use_container_width=True)
-                    
-                with c_right:
-                    st.markdown("### 📋 Top 20 Leaderboard")
-                    st.dataframe(
-                        top20,
-                        column_config={
-                            "Potential Score": st.column_config.ProgressColumn("Score", min_value=0, max_value=100, format="%.1f"),
-                            "last_price": st.column_config.NumberColumn("Price", format="Rp %d")
-                        },
-                        hide_index=True,
-                        use_container_width=True,
-                        height=500
-                    )
-            else:
-                st.warning(msg)
+            with col_res2:
+                # Top 1 Highlight
+                best = top20.iloc[0]
+                st.markdown('<div class="css-card">', unsafe_allow_html=True)
+                st.markdown(f'<div class="card-title">🥇 Top Pick: {best["Stock Code"]}</div>', unsafe_allow_html=True)
+                
+                # Radar Chart for Score Breakdown
+                categories = ['Trend', 'Momentum', 'NBSA', 'Foreign']
+                values = [best['Trend Score'], best['Momentum Score'], best['NBSA Score'], best['Foreign Contrib Score']]
+                
+                fig = px.line_polar(r=values, theta=categories, line_close=True)
+                fig.update_traces(fill='toself', line_color='#4318FF')
+                fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])), height=300, margin=dict(t=20, b=20))
+                st.plotly_chart(fig, use_container_width=True)
+                
+                st.metric("Total Score", f"{best['Potential Score']:.1f}")
+                st.markdown('</div>', unsafe_allow_html=True)
 
-# --- PAGE 4: PORTFOLIO SIM ---
-elif menu == "💼 Portfolio Sim":
-    st.markdown("## 💼 Portfolio Simulator")
+# PAGE 4: PORTFOLIO
+elif menu == "💼 Portfolio Simulator":
+    st.markdown('<h2 style="color:#2B3674;">💼 Portfolio Backtest Simulator</h2>', unsafe_allow_html=True)
     
-    c1, c2, c3 = st.columns(3)
-    start_d = c1.date_input("Start Date", df['Last Trading Date'].min())
-    end_d = c2.date_input("End Date", df['Last Trading Date'].max())
-    capital = c3.number_input("Initial Capital (IDR)", value=100_000_000, step=1_000_000)
+    st.markdown('<div class="css-card">', unsafe_allow_html=True)
+    avail_dates = sorted(df['Last Trading Date'].unique())
     
-    if st.button("Run Simulation"):
-        st.info("Simulation logic running... (Connect your `simulate_portfolio_range` function here)")
-        # Example Output
-        st.success(f"Simulation Complete! Final Value: Rp {capital*1.12:,.0f} (+12%)")
+    c1, c2, c3, c4 = st.columns(4)
+    with c1: start_d = st.selectbox("📅 Tanggal Beli", avail_dates, index=max(0, len(avail_dates)-31), format_func=lambda x: pd.Timestamp(x).strftime('%d-%m-%Y'))
+    with c2: end_d = st.selectbox("📅 Tanggal Jual", avail_dates, index=len(avail_dates)-1, format_func=lambda x: pd.Timestamp(x).strftime('%d-%m-%Y'))
+    with c3: cap = st.number_input("💰 Modal Awal (Rp)", 1_000_000, 10_000_000_000, 100_000_000, 1_000_000)
+    with c4: 
+        st.write("") 
+        st.write("")
+        sim_btn = st.button("🚀 Mulai Simulasi", type="primary")
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    if sim_btn:
+        if pd.Timestamp(start_d) >= pd.Timestamp(end_d): st.error("Tanggal Jual harus setelah Beli.")
+        else:
+            with st.spinner("Menghitung PnL..."):
+                from app import simulate_portfolio_range # Assuming func is accessible or pasted above
+                df_port, sum_port, msg = simulate_portfolio_range(df, cap, pd.Timestamp(start_d), pd.Timestamp(end_d))
+                
+                if msg == "success":
+                    # Result Cards
+                    r1, r2, r3 = st.columns(3)
+                    r1.markdown(f"""<div class="css-card"><div style="color:#A3AED0;">Final Value</div><div style="font-size:24px; font-weight:bold; color:#2B3674;">Rp {sum_port['Final Portfolio Value']:,.0f}</div></div>""", unsafe_allow_html=True)
+                    r2.markdown(f"""<div class="css-card"><div style="color:#A3AED0;">Net Profit</div><div style="font-size:24px; font-weight:bold; color:{'green' if sum_port['Net Profit']>0 else 'red'};">Rp {sum_port['Net Profit']:,.0f}</div></div>""", unsafe_allow_html=True)
+                    r3.markdown(f"""<div class="css-card"><div style="color:#A3AED0;">ROI</div><div style="font-size:24px; font-weight:bold; color:#4318FF;">{sum_port['Total ROI']:.2f}%</div></div>""", unsafe_allow_html=True)
+                    
+                    st.markdown('<div class="css-card">', unsafe_allow_html=True)
+                    st.dataframe(df_port[['Stock Code', 'Sector', 'Buy Price', 'Sell Price', 'Gain/Loss (Rp)', 'ROI (%)']], use_container_width=True)
+                    st.markdown('</div>', unsafe_allow_html=True)
+
+# PAGE 5: MSCI
+elif menu == "🌏 MSCI Projector":
+    st.markdown('<h2 style="color:#2B3674;">🌏 MSCI Indonesia Proxy</h2>', unsafe_allow_html=True)
+    st.info("Prediksi kandidat masuk indeks MSCI berdasarkan Float Market Cap & Likuiditas (ATVR).")
+    
+    st.markdown('<div class="css-card">', unsafe_allow_html=True)
+    col_in1, col_in2 = st.columns(2)
+    with col_in1: usd = st.number_input("Kurs USD/IDR", value=16200, step=50)
+    with col_in2: 
+        st.write("")
+        calc_btn = st.button("Hitung Proyeksi", type="primary")
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    if calc_btn:
+        df_msci = calculate_msci_projection_v2(df, df['Last Trading Date'].max(), usd)
         
-        # Mock Chart
-        chart_data = pd.DataFrame(np.random.randn(20, 3), columns=['a', 'b', 'c'])
-        st.area_chart(chart_data)
-
-# --- PAGE 5: MSCI RADAR ---
-elif menu == "🌏 MSCI Radar":
-    st.markdown("## 🌏 MSCI Standard Index Proxy")
-    
-    usd_rate = st.number_input("USD/IDR Rate", value=16200)
-    msci_df = get_msci_candidates(df, df['Last Trading Date'].max(), usd_rate)
-    
-    # Scatter Plot Analysis
-    fig = px.scatter(
-        msci_df, 
-        x="ATVR 12M (%)", 
-        y="Float Cap ($B)", 
-        color="Status",
-        size="Float Cap ($B)",
-        hover_name="Stock Code",
-        title="Liquidity vs Size Map",
-        color_discrete_map={'Potential': '#238636', 'Watchlist': '#8B949E'}
-    )
-    fig.add_hline(y=1.5, line_dash="dash", annotation_text="Min Float Cap ($1.5B)")
-    fig.add_vline(x=15, line_dash="dash", annotation_text="Min Liq (15%)")
-    st.plotly_chart(fig, use_container_width=True)
-    
-    st.markdown("### Candidates List")
-    st.dataframe(
-        msci_df, 
-        column_config={
-            "Float Cap ($B)": st.column_config.NumberColumn(format="$ %.2f B"),
-            "ATVR 12M (%)": st.column_config.NumberColumn(format="%.1f %%")
-        },
-        use_container_width=True
-    )
+        # Categorization logic inline
+        def cat_msci(r):
+            if r['Float Cap ($B)'] >= 1.5 and r['ATVR 12M (%)'] >= 15: return "✅ Potential Standard"
+            elif r['Float Cap ($B)'] >= 1.5: return "⚠️ Illiquid (Risk)"
+            elif r['Float Cap ($B)'] >= 0.8: return "🔹 Small Cap"
+            else: return "🔻 Micro"
+        
+        df_msci['Status'] = df_msci.apply(cat_msci, axis=1)
+        
+        # Scatter Plot
+        st.markdown('<div class="css-card">', unsafe_allow_html=True)
+        fig = px.scatter(
+            df_msci.head(100), 
+            x="ATVR 12M (%)", y="Float Cap ($B)", 
+            color="Status", size="Full Cap ($B)", hover_name="Stock Code",
+            color_discrete_map={"✅ Potential Standard": "#00C853", "⚠️ Illiquid (Risk)": "#FF3D00", "🔹 Small Cap": "#2962FF", "🔻 Micro": "#B0BEC5"}
+        )
+        fig.add_hline(y=1.5, line_dash="dash", annotation_text="Standard Threshold ($1.5B)")
+        fig.add_vline(x=15, line_dash="dash", annotation_text="Liquidity (15%)")
+        fig.update_layout(paper_bgcolor='white', plot_bgcolor='white')
+        st.plotly_chart(fig, use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        st.markdown('<div class="css-card">', unsafe_allow_html=True)
+        st.markdown("#### 📋 Candidate List")
+        st.dataframe(
+            df_msci[df_msci['Status'] == "✅ Potential Standard"][['Stock Code', 'Status', 'Float Cap ($B)', 'ATVR 12M (%)']], 
+            use_container_width=True,
+            column_config={"Float Cap ($B)": st.column_config.NumberColumn(format="$ %.2f B"), "ATVR 12M (%)": st.column_config.NumberColumn(format="%.2f %%")}
+        )
+        st.markdown('</div>', unsafe_allow_html=True)
 
 # --- FOOTER ---
 st.markdown("---")
-st.markdown("<center> IDX Quant Dashboard Pro • Built with Streamlit & Plotly </center>", unsafe_allow_html=True)
+st.markdown("<center style='color:#A3AED0;'> IDX Quant Pro v2.0 • Powered by Streamlit </center>", unsafe_allow_html=True)
