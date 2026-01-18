@@ -156,35 +156,6 @@ st.markdown("""
     .pulse {
         animation: pulse 2s infinite;
     }
-    
-    /* Tooltip styling */
-    .tooltip {
-        position: relative;
-        display: inline-block;
-        cursor: help;
-    }
-    
-    .tooltip .tooltiptext {
-        visibility: hidden;
-        width: 200px;
-        background-color: #333;
-        color: #fff;
-        text-align: center;
-        border-radius: 6px;
-        padding: 5px;
-        position: absolute;
-        z-index: 1;
-        bottom: 125%;
-        left: 50%;
-        margin-left: -100px;
-        opacity: 0;
-        transition: opacity 0.3s;
-    }
-    
-    .tooltip:hover .tooltiptext {
-        visibility: visible;
-        opacity: 1;
-    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -213,6 +184,61 @@ W = dict(
     mom_price=0.40,  mom_vol=0.25,  mom_akum=0.25,  mom_ff=0.10,
     blend_trend=0.35, blend_mom=0.35, blend_nbsa=0.20, blend_fcontrib=0.05, blend_unusual=0.05
 )
+
+# ==============================================================================
+# 🛠️ FUNGSI FORMATTING BAHASA INDONESIA
+# ==============================================================================
+def format_rupiah(value):
+    """Format nilai Rupiah dengan label yang benar dalam Bahasa Indonesia"""
+    if value is None or pd.isna(value):
+        return "Rp 0"
+    
+    value = float(value)
+    
+    if abs(value) >= 1e12:  # Triliun
+        return f"Rp {value/1e12:,.2f} Triliun"
+    elif abs(value) >= 1e9:  # Miliar
+        return f"Rp {value/1e9:,.1f} Miliar"
+    elif abs(value) >= 1e6:  # Juta
+        return f"Rp {value/1e6:,.1f} Juta"
+    elif abs(value) >= 1e3:  # Ribu
+        return f"Rp {value:,.0f}"
+    else:
+        return f"Rp {value:,.0f}"
+
+def format_usd(value):
+    """Format nilai USD dengan label yang benar dalam Bahasa Indonesia"""
+    if value is None or pd.isna(value):
+        return "US$ 0"
+    
+    value = float(value)
+    
+    if abs(value) >= 1e9:  # Miliar
+        return f"US$ {value/1e9:,.2f} Miliar"
+    elif abs(value) >= 1e6:  # Juta
+        return f"US$ {value/1e6:,.1f} Juta"
+    else:
+        return f"US$ {value:,.0f}"
+
+def format_volume(value):
+    """Format volume dengan label yang benar"""
+    if value is None or pd.isna(value):
+        return "0"
+    
+    value = float(value)
+    
+    if abs(value) >= 1e9:  # Miliar
+        return f"{value/1e9:,.1f} Miliar"
+    elif abs(value) >= 1e6:  # Juta
+        return f"{value/1e6:,.1f} Juta"
+    else:
+        return f"{value:,.0f}"
+
+def format_percentage(value):
+    """Format persentase"""
+    if value is None or pd.isna(value):
+        return "0.00%"
+    return f"{float(value):.2f}%"
 
 # ==============================================================================
 # 📦 3) FUNGSI MEMUAT DATA (via SERVICE ACCOUNT)
@@ -316,7 +342,7 @@ def load_data():
             return pd.DataFrame(), msg, "error"
 
 # ==============================================================================
-# 🛠️ 4) FUNGSI KALKULASI UTAMA (SAMA DENGAN SEBELUMNYA)
+# 🛠️ 4) FUNGSI KALKULASI UTAMA
 # ==============================================================================
 def pct_rank(s: pd.Series):
     s = pd.to_numeric(s, errors="coerce")
@@ -511,9 +537,9 @@ def calculate_msci_projection_v2(df, latest_date, usd_rate):
         full_mcap_idr_t = (close * listed_shares) / 1e12 # Triliun
         float_mcap_idr_t = full_mcap_idr_t * (free_float_pct / 100)
         
-        # USD Conversion (Billions)
-        full_mcap_usd_b = (full_mcap_idr_t * 1e12) / usd_rate / 1e9
-        float_mcap_usd_b = (float_mcap_idr_t * 1e12) / usd_rate / 1e9
+        # USD Conversion (Miliar)
+        full_mcap_usd_miliar = (full_mcap_idr_t * 1e12) / usd_rate / 1e9
+        float_mcap_usd_miliar = (float_mcap_idr_t * 1e12) / usd_rate / 1e9
         
         # --- 2. LIQUIDITY (ATVR) ---
         # Total Value Transaksi (IDR)
@@ -535,13 +561,13 @@ def calculate_msci_projection_v2(df, latest_date, usd_rate):
             'Close': close, 
             'Sector': row['Sector'],
             # IDR Metrics
-            'Float Cap (IDR T)': float_mcap_idr_t,
-            # USD Metrics
-            'Full Cap (US$ Miliar)': full_mcap_usd_b,
-            'Float Cap (US$ Miliar)': float_mcap_usd_b,
-            # Liquidity
-            'ATVR 12M (%)': atvr_12m,
-            'ATVR 3M (%)': atvr_3m
+            'Float Cap (IDR Triliun)': float_mcap_idr_t,
+            # USD Metrics (BAHASA INDONESIA)
+            'Full Cap (US$ Miliar)': full_mcap_usd_miliar,
+            'Float Cap (US$ Miliar)': float_mcap_usd_miliar,
+            # Liquidity (BAHASA INDONESIA)
+            'ATVR 12 Bulan (%)': atvr_12m,
+            'ATVR 3 Bulan (%)': atvr_3m
         })
         
     df_msci = pd.DataFrame(results)
@@ -758,8 +784,8 @@ with tabs[0]:
         st.markdown(f"""
         <div class="metric-card">
             <div style="font-size:0.9rem; color:#6c757d; margin-bottom:0.5rem;">Nilai Transaksi</div>
-            <div style="font-size:1.8rem; font-weight:700; color:#4361ee;">Rp {overview['total_value']/1e9:.1f}B</div>
-            <div style="font-size:0.8rem; margin-top:0.5rem;">Volume: {overview['total_volume']/1e9:.1f}B</div>
+            <div style="font-size:1.8rem; font-weight:700; color:#4361ee;">{format_rupiah(overview['total_value'])}</div>
+            <div style="font-size:0.8rem; margin-top:0.5rem;">Volume: {format_volume(overview['total_volume'])}</div>
         </div>
         """, unsafe_allow_html=True)
     
@@ -769,7 +795,7 @@ with tabs[0]:
         <div class="metric-card">
             <div style="font-size:0.9rem; color:#6c757d; margin-bottom:0.5rem;">Rata² Perubahan</div>
             <div style="font-size:1.8rem; font-weight:700; color:{color_change};">{overview['avg_change']:.2f}%</div>
-            <div style="font-size:0.8rem; margin-top:0.5rem;">Foreign Net: Rp {overview['foreign_net']/1e9:.1f}B</div>
+            <div style="font-size:0.8rem; margin-top:0.5rem;">Foreign Net: {format_rupiah(overview['foreign_net'])}</div>
         </div>
         """, unsafe_allow_html=True)
     
@@ -778,7 +804,7 @@ with tabs[0]:
         <div class="metric-card">
             <div style="font-size:0.9rem; color:#6c757d; margin-bottom:0.5rem;">Unusual Volume</div>
             <div style="font-size:1.8rem; font-weight:700; color:#f8961e;">{overview['unusual_volume']:,}</div>
-            <div style="font-size:0.8rem; margin-top:0.5rem;">MFV Total: Rp {overview['total_mfv']/1e9:.1f}B</div>
+            <div style="font-size:0.8rem; margin-top:0.5rem;">MFV Total: {format_rupiah(overview['total_mfv'])}</div>
         </div>
         """, unsafe_allow_html=True)
     
@@ -812,7 +838,7 @@ with tabs[0]:
                 gainers.assign(
                     Close=gainers['Close'].apply(lambda x: f"Rp {x:,.0f}"),
                     Change=gainers['Change %'].apply(lambda x: f"{x:+.2f}%"),
-                    Volume=gainers['Volume'].apply(lambda x: f"{x/1e6:.1f}M")
+                    Volume=gainers['Volume'].apply(lambda x: f"{format_volume(x)}")
                 )[['Stock Code', 'Close', 'Change', 'Volume']],
                 hide_index=True,
                 use_container_width=True
@@ -834,7 +860,7 @@ with tabs[0]:
                 losers.assign(
                     Close=losers['Close'].apply(lambda x: f"Rp {x:,.0f}"),
                     Change=losers['Change %'].apply(lambda x: f"{x:+.2f}%"),
-                    Volume=losers['Volume'].apply(lambda x: f"{x/1e6:.1f}M")
+                    Volume=losers['Volume'].apply(lambda x: f"{format_volume(x)}")
                 )[['Stock Code', 'Close', 'Change', 'Volume']],
                 hide_index=True,
                 use_container_width=True
@@ -940,7 +966,7 @@ with tabs[1]:
                 st.markdown(f"""
                 <div class="metric-card">
                     <div style="font-size:0.8rem; color:#6c757d;">NFF Hari Ini</div>
-                    <div style="font-size:1.5rem; font-weight:700; color:{nff_color};">Rp {nff_value/1e9:.2f}B</div>
+                    <div style="font-size:1.5rem; font-weight:700; color:{nff_color};">{format_rupiah(nff_value)}</div>
                 </div>
                 """, unsafe_allow_html=True)
             
@@ -950,7 +976,7 @@ with tabs[1]:
                 st.markdown(f"""
                 <div class="metric-card">
                     <div style="font-size:0.8rem; color:#6c757d;">Money Flow</div>
-                    <div style="font-size:1.5rem; font-weight:700; color:{mfv_color};">Rp {mfv_value/1e9:.2f}B</div>
+                    <div style="font-size:1.5rem; font-weight:700; color:{mfv_color};">{format_rupiah(mfv_value)}</div>
                 </div>
                 """, unsafe_allow_html=True)
             
@@ -976,7 +1002,7 @@ with tabs[1]:
                 st.markdown(f"""
                 <div class="metric-card">
                     <div style="font-size:0.8rem; color:#6c757d;">Market Cap</div>
-                    <div style="font-size:1.5rem; font-weight:700;">Rp {mcap:.2f}T</div>
+                    <div style="font-size:1.5rem; font-weight:700;">Rp {mcap:.2f} Triliun</div>
                 </div>
                 """, unsafe_allow_html=True)
             
@@ -1075,8 +1101,8 @@ with tabs[1]:
                 st.metric("Max Daily Gain", f"{df_stock['Change %'].max():.2f}%")
             
             with col_stat2:
-                st.metric("Total NFF Period", f"Rp {df_stock['NFF (Rp)'].sum()/1e9:.2f}B")
-                st.metric("Avg Daily Volume", f"{df_stock['Volume'].mean()/1e6:.1f}M")
+                st.metric("Total NFF Period", format_rupiah(df_stock['NFF (Rp)'].sum()))
+                st.metric("Avg Daily Volume", format_volume(df_stock['Volume'].mean()))
             
             with col_stat3:
                 st.metric("Volatility (Std Dev)", f"{df_stock['Change %'].std():.2f}%")
@@ -1160,9 +1186,9 @@ with tabs[2]:
         formatted_df = filtered_stocks[display_cols].copy()
         formatted_df['Close'] = formatted_df['Close'].apply(lambda x: f"Rp {x:,.0f}")
         formatted_df['Change %'] = formatted_df['Change %'].apply(lambda x: f"{x:+.2f}%")
-        formatted_df['Volume'] = formatted_df['Volume'].apply(lambda x: f"{x/1e6:.1f}M")
-        formatted_df['Value'] = formatted_df['Value'].apply(lambda x: f"Rp {x/1e9:.1f}B")
-        formatted_df['NFF (Rp)'] = formatted_df['NFF (Rp)'].apply(lambda x: f"Rp {x/1e9:.2f}B")
+        formatted_df['Volume'] = formatted_df['Volume'].apply(lambda x: f"{format_volume(x)}")
+        formatted_df['Value'] = formatted_df['Value'].apply(lambda x: f"{format_rupiah(x)}")
+        formatted_df['NFF (Rp)'] = formatted_df['NFF (Rp)'].apply(lambda x: f"{format_rupiah(x)}")
         
         st.dataframe(
             formatted_df,
@@ -1299,7 +1325,7 @@ with tabs[3]:
         st.warning(msg)
 
 # ==============================================================================
-# TAB 5 & 6: FOREIGN FLOW & MONEY FLOW (DIPERTAHANKAN DENGAN IMPROVEMENT)
+# TAB 5: FOREIGN FLOW (BAHASA INDONESIA)
 # ==============================================================================
 with tabs[4]:
     st.markdown("## 🌊 Analisis Net Foreign Flow")
@@ -1312,7 +1338,7 @@ with tabs[4]:
     with nff_tab1:
         st.dataframe(
             nff7.head(20).assign(
-                **{'Total Net FF (Rp)': lambda x: x['Total Net FF (Rp)'].apply(lambda y: f"Rp {y/1e9:.2f}B"),
+                **{'Total Net FF (Rp)': lambda x: x['Total Net FF (Rp)'].apply(lambda y: format_rupiah(y)),
                   'Harga Terakhir': lambda x: x['Harga Terakhir'].apply(lambda y: f"Rp {y:,.0f}")}
             ),
             hide_index=True,
@@ -1328,7 +1354,7 @@ with tabs[4]:
     with nff_tab2:
         st.dataframe(
             nff30.head(20).assign(
-                **{'Total Net FF (Rp)': lambda x: x['Total Net FF (Rp)'].apply(lambda y: f"Rp {y/1e9:.2f}B"),
+                **{'Total Net FF (Rp)': lambda x: x['Total Net FF (Rp)'].apply(lambda y: format_rupiah(y)),
                   'Harga Terakhir': lambda x: x['Harga Terakhir'].apply(lambda y: f"Rp {y:,.0f}")}
             ),
             hide_index=True,
@@ -1338,7 +1364,7 @@ with tabs[4]:
     with nff_tab3:
         st.dataframe(
             nff90.head(20).assign(
-                **{'Total Net FF (Rp)': lambda x: x['Total Net FF (Rp)'].apply(lambda y: f"Rp {y/1e9:.2f}B"),
+                **{'Total Net FF (Rp)': lambda x: x['Total Net FF (Rp)'].apply(lambda y: format_rupiah(y)),
                   'Harga Terakhir': lambda x: x['Harga Terakhir'].apply(lambda y: f"Rp {y:,.0f}")}
             ),
             hide_index=True,
@@ -1348,7 +1374,7 @@ with tabs[4]:
     with nff_tab4:
         st.dataframe(
             nff180.head(20).assign(
-                **{'Total Net FF (Rp)': lambda x: x['Total Net FF (Rp)'].apply(lambda y: f"Rp {y/1e9:.2f}B"),
+                **{'Total Net FF (Rp)': lambda x: x['Total Net FF (Rp)'].apply(lambda y: format_rupiah(y)),
                   'Harga Terakhir': lambda x: x['Harga Terakhir'].apply(lambda y: f"Rp {y:,.0f}")}
             ),
             hide_index=True,
@@ -1371,6 +1397,9 @@ with tabs[4]:
     fig_nff_trend.update_layout(height=400)
     st.plotly_chart(fig_nff_trend, use_container_width=True)
 
+# ==============================================================================
+# TAB 6: MONEY FLOW (BAHASA INDONESIA)
+# ==============================================================================
 with tabs[5]:
     st.markdown("## 💰 Analisis Money Flow Value")
     
@@ -1383,7 +1412,7 @@ with tabs[5]:
         st.markdown("#### 🥇 Top 10 - 7 Hari")
         st.dataframe(
             mfv7.head(10).assign(
-                **{'Total Money Flow (Rp)': lambda x: x['Total Money Flow (Rp)'].apply(lambda y: f"Rp {y/1e9:.2f}B"),
+                **{'Total Money Flow (Rp)': lambda x: x['Total Money Flow (Rp)'].apply(lambda y: format_rupiah(y)),
                   'Harga Terakhir': lambda x: x['Harga Terakhir'].apply(lambda y: f"Rp {y:,.0f}")}
             ),
             hide_index=True,
@@ -1393,7 +1422,7 @@ with tabs[5]:
         st.markdown("#### 🥇 Top 10 - 90 Hari")
         st.dataframe(
             mfv90.head(10).assign(
-                **{'Total Money Flow (Rp)': lambda x: x['Total Money Flow (Rp)'].apply(lambda y: f"Rp {y/1e9:.2f}B"),
+                **{'Total Money Flow (Rp)': lambda x: x['Total Money Flow (Rp)'].apply(lambda y: format_rupiah(y)),
                   'Harga Terakhir': lambda x: x['Harga Terakhir'].apply(lambda y: f"Rp {y:,.0f}")}
             ),
             hide_index=True,
@@ -1404,7 +1433,7 @@ with tabs[5]:
         st.markdown("#### 🥈 Top 10 - 30 Hari")
         st.dataframe(
             mfv30.head(10).assign(
-                **{'Total Money Flow (Rp)': lambda x: x['Total Money Flow (Rp)'].apply(lambda y: f"Rp {y/1e9:.2f}B"),
+                **{'Total Money Flow (Rp)': lambda x: x['Total Money Flow (Rp)'].apply(lambda y: format_rupiah(y)),
                   'Harga Terakhir': lambda x: x['Harga Terakhir'].apply(lambda y: f"Rp {y:,.0f}")}
             ),
             hide_index=True,
@@ -1414,7 +1443,7 @@ with tabs[5]:
         st.markdown("#### 🥈 Top 10 - 180 Hari")
         st.dataframe(
             mfv180.head(10).assign(
-                **{'Total Money Flow (Rp)': lambda x: x['Total Money Flow (Rp)'].apply(lambda y: f"Rp {y/1e9:.2f}B"),
+                **{'Total Money Flow (Rp)': lambda x: x['Total Money Flow (Rp)'].apply(lambda y: format_rupiah(y)),
                   'Harga Terakhir': lambda x: x['Harga Terakhir'].apply(lambda y: f"Rp {y:,.0f}")}
             ),
             hide_index=True,
@@ -1422,7 +1451,7 @@ with tabs[5]:
         )
 
 # ==============================================================================
-# TAB 7: BACKTESTING (DIPERBAIKI)
+# TAB 7: BACKTESTING ENGINE (FIXED)
 # ==============================================================================
 with tabs[6]:
     st.markdown("## 🧪 Backtesting Engine")
@@ -1510,22 +1539,20 @@ with tabs[6]:
                 st.plotly_chart(fig_return_dist, use_container_width=True)
             
             with col_viz2:
-                # Scatter plot return vs score
+                # Scatter plot return vs score (TANPA TRENDLINE)
                 fig_scatter = px.scatter(
                     df_backtest,
                     x='Score at Signal',
                     y='Return to Date (%)',
                     color='Return to Date (%)',
                     color_continuous_scale=px.colors.diverging.RdYlGn,
-                    title='Hubungan Skor vs Return',
-                    trendline="ols"
+                    title='Hubungan Skor vs Return'
                 )
                 fig_scatter.update_layout(height=400)
                 st.plotly_chart(fig_scatter, use_container_width=True)
             
             st.markdown("### 📊 Leaderboard Saham")
             
-            # FIXED: Perbaikan di sini - pastikan string ditutup dengan benar
             freq_stats = df_backtest.groupby('Stock Code').agg(
                 Frekuensi=('Signal Date', 'count'),
                 Avg_Return=('Return to Date (%)', 'mean'),
@@ -1558,8 +1585,11 @@ with tabs[6]:
                     df_backtest.sort_values('Signal Date', ascending=False),
                     use_container_width=True
                 )
+        else:
+            st.warning("Tidak ada data backtest yang dihasilkan.")
+
 # ==============================================================================
-# TAB 8: PORTFOLIO SIMULATOR (DIPERBAIKI)
+# TAB 8: PORTFOLIO SIMULATOR (FIXED)
 # ==============================================================================
 with tabs[7]:
     st.markdown("## 💼 Portfolio Simulator")
@@ -1618,7 +1648,7 @@ with tabs[7]:
                     st.markdown(f"""
                     <div class="metric-card">
                         <div style="font-size:0.8rem; color:#6c757d;">Modal Awal</div>
-                        <div style="font-size:1.5rem; font-weight:700;">Rp {sum_port['Initial Capital']:,.0f}</div>
+                        <div style="font-size:1.5rem; font-weight:700;">{format_rupiah(sum_port['Initial Capital'])}</div>
                     </div>
                     """, unsafe_allow_html=True)
                 
@@ -1627,7 +1657,7 @@ with tabs[7]:
                     st.markdown(f"""
                     <div class="metric-card">
                         <div style="font-size:0.8rem; color:#6c757d;">Saldo Akhir</div>
-                        <div style="font-size:1.5rem; font-weight:700;">Rp {final_val:,.0f}</div>
+                        <div style="font-size:1.5rem; font-weight:700;">{format_rupiah(final_val)}</div>
                     </div>
                     """, unsafe_allow_html=True)
                 
@@ -1637,7 +1667,7 @@ with tabs[7]:
                     st.markdown(f"""
                     <div class="metric-card">
                         <div style="font-size:0.8rem; color:#6c757d;">Net Profit/Loss</div>
-                        <div style="font-size:1.5rem; font-weight:700; color:{profit_color};">Rp {net_profit:,.0f}</div>
+                        <div style="font-size:1.5rem; font-weight:700; color:{profit_color};">{format_rupiah(net_profit)}</div>
                     </div>
                     """, unsafe_allow_html=True)
                 
@@ -1689,9 +1719,9 @@ with tabs[7]:
                 df_display = df_port.copy()
                 df_display['Buy Price'] = df_display['Buy Price'].apply(lambda x: f"Rp {x:,.0f}")
                 df_display['Sell Price'] = df_display['Sell Price'].apply(lambda x: f"Rp {x:,.0f}")
-                df_display['Gain/Loss (Rp)'] = df_display['Gain/Loss (Rp)'].apply(lambda x: f"Rp {x:,.0f}")
+                df_display['Gain/Loss (Rp)'] = df_display['Gain/Loss (Rp)'].apply(lambda x: format_rupiah(x))
                 df_display['ROI (%)'] = df_display['ROI (%)'].apply(lambda x: f"{x:.2f}%")
-                df_display['Final Value'] = df_display['Final Value'].apply(lambda x: f"Rp {x:,.0f}")
+                df_display['Final Value'] = df_display['Final Value'].apply(lambda x: format_rupiah(x))
                 
                 st.dataframe(
                     df_display[['Stock Code', 'Sector', 'Buy Price', 'Sell Price', 'Gain/Loss (Rp)', 'ROI (%)', 'Final Value']],
@@ -1712,13 +1742,13 @@ with tabs[7]:
                 st.error(f"❌ {msg}")
 
 # ==============================================================================
-# TAB 9: MSCI SIMULATOR (DIPERBAIKI)
+# TAB 9: MSCI SIMULATOR (BAHASA INDONESIA LENGKAP)
 # ==============================================================================
 with tabs[8]:
     st.markdown("## 🌏 MSCI Indonesia Index Simulator")
     st.info("""
     Simulator untuk memperkirakan kandidat MSCI Standard Index berdasarkan:
-    - Market Capitalization (USD)
+    - Market Capitalization (US$)
     - Liquidity (ATVR - Annualized Traded Value Ratio)
     - Free Float Percentage
     """)
@@ -1736,7 +1766,7 @@ with tabs[8]:
         
         with col_m1:
             usd_idr = st.number_input(
-                "💵 Kurs USD/IDR Saat Ini",
+                "💵 Kurs US$/IDR Saat Ini",
                 value=16500,
                 min_value=10000,
                 max_value=20000,
@@ -1744,8 +1774,8 @@ with tabs[8]:
             )
         
         with col_m2:
-            min_float_mcap_usd = st.number_input(
-                "🎯 Min. Float Market Cap (US$ Miliar)",
+            min_float_mcap_usd_miliar = st.number_input(
+                "🎯 Minimal Float Market Cap (US$ Miliar)",
                 value=1.5,
                 min_value=0.1,
                 max_value=10.0,
@@ -1754,7 +1784,7 @@ with tabs[8]:
         
         with col_m3:
             min_atvr = st.number_input(
-                "📈 Min. Liquidity (ATVR %)",
+                "📈 Minimal Liquidity (ATVR %)",
                 value=15.0,
                 min_value=0.0,
                 max_value=100.0,
@@ -1774,16 +1804,16 @@ with tabs[8]:
                     # Categorization function
                     def categorize_msci(row):
                         # Check size criteria
-                        size_ok = row['Float Cap (US$ Miliar)'] >= min_float_mcap_usd
+                        size_ok = row['Float Cap (US$ Miliar)'] >= min_float_mcap_usd_miliar
                         
                         # Check liquidity criteria (both 3M and 12M)
-                        liquidity_ok = (row['ATVR 3M (%)'] >= min_atvr) and (row['ATVR 12M (%)'] >= min_atvr)
+                        liquidity_ok = (row['ATVR 3 Bulan (%)'] >= min_atvr) and (row['ATVR 12 Bulan (%)'] >= min_atvr)
                         
                         if size_ok and liquidity_ok:
                             return "✅ Potential Standard"
                         elif size_ok and not liquidity_ok:
                             return "⚠️ Risk (Low Liquidity)"
-                        elif row['Float Cap (US$ Miliar)'] >= (min_float_mcap_usd * 0.3):
+                        elif row['Float Cap (US$ Miliar)'] >= (min_float_mcap_usd_miliar * 0.3):
                             return "🔹 Small Cap"
                         else:
                             return "🔻 Micro Cap"
@@ -1822,11 +1852,11 @@ with tabs[8]:
                         # Scatter plot: Float Cap vs ATVR
                         fig_msci = px.scatter(
                             df_msci.head(50),  # Limit to top 50 for better visibility
-                            x='ATVR 12M (%)',
+                            x='ATVR 12 Bulan (%)',
                             y='Float Cap (US$ Miliar)',
                             color='MSCI Status',
                             size='Full Cap (US$ Miliar)',
-                            hover_data=['Stock Code', 'Sector', 'ATVR 3M (%)'],
+                            hover_data=['Stock Code', 'Sector', 'ATVR 3 Bulan (%)'],
                             title="MSCI Qualification Map (Top 50)",
                             color_discrete_map={
                                 '✅ Potential Standard': '#2ecc71',
@@ -1837,10 +1867,10 @@ with tabs[8]:
                         )
                         # Add threshold lines
                         fig_msci.add_hline(
-                            y=min_float_mcap_usd,
+                            y=min_float_mcap_usd_miliar,
                             line_dash="dash",
                             line_color="red",
-                            annotation_text=f"Min Float: ${min_float_mcap_usd}B"
+                            annotation_text=f"Min Float: US$ {min_float_mcap_usd_miliar} Miliar"
                         )
                         fig_msci.add_vline(
                             x=min_atvr,
@@ -1860,10 +1890,10 @@ with tabs[8]:
                         
                         if not potential_df.empty:
                             # Format display
-                            display_df = potential_df[['Stock Code', 'Sector', 'Float Cap (US$ Miliar)', 'ATVR 12M (%)', 'ATVR 3M (%)']].copy()
-                            display_df['Float Cap (US$ Miliar)'] = display_df['Float Cap (US$ Miliar)'].apply(lambda x: f"US$ {x:.2f} Miliar")
-                            display_df['ATVR 12M (%)'] = display_df['ATVR 12M (%)'].apply(lambda x: f"{x:.1f}%")
-                            display_df['ATVR 3M (%)'] = display_df['ATVR 3M (%)'].apply(lambda x: f"{x:.1f}%")
+                            display_df = potential_df[['Stock Code', 'Sector', 'Float Cap (US$ Miliar)', 'ATVR 12 Bulan (%)', 'ATVR 3 Bulan (%)']].copy()
+                            display_df['Float Cap (US$ Miliar)'] = display_df['Float Cap (US$ Miliar)'].apply(lambda x: format_usd(x * 1e9))  # Convert back to full USD
+                            display_df['ATVR 12 Bulan (%)'] = display_df['ATVR 12 Bulan (%)'].apply(lambda x: f"{x:.1f}%")
+                            display_df['ATVR 3 Bulan (%)'] = display_df['ATVR 3 Bulan (%)'].apply(lambda x: f"{x:.1f}%")
                             
                             st.dataframe(
                                 display_df,
@@ -1881,9 +1911,16 @@ with tabs[8]:
                     msci_tabs = st.tabs(["All Stocks", "By Status", "Export"])
                     
                     with msci_tabs[0]:
-                        # All stocks
+                        # All stocks with formatted values
+                        display_all = df_msci.copy()
+                        display_all['Float Cap (US$ Miliar)'] = display_all['Float Cap (US$ Miliar)'].apply(lambda x: format_usd(x * 1e9))
+                        display_all['Full Cap (US$ Miliar)'] = display_all['Full Cap (US$ Miliar)'].apply(lambda x: format_usd(x * 1e9))
+                        display_all['ATVR 12 Bulan (%)'] = display_all['ATVR 12 Bulan (%)'].apply(lambda x: f"{x:.1f}%")
+                        display_all['ATVR 3 Bulan (%)'] = display_all['ATVR 3 Bulan (%)'].apply(lambda x: f"{x:.1f}%")
+                        display_all['Float Cap (IDR Triliun)'] = display_all['Float Cap (IDR Triliun)'].apply(lambda x: f"Rp {x:.2f} Triliun")
+                        
                         st.dataframe(
-                            df_msci.sort_values('Float Cap (US$ Miliar)', ascending=False),
+                            display_all.sort_values('Float Cap (US$ Miliar)', ascending=False),
                             use_container_width=True,
                             hide_index=True
                         )
@@ -1920,7 +1957,7 @@ with tabs[8]:
                         st.json({
                             "simulation_date": str(latest_date.date()),
                             "usd_rate": usd_idr,
-                            "min_float_mcap_usd": min_float_mcap_usd,
+                            "min_float_mcap_usd_miliar": min_float_mcap_usd_miliar,
                             "min_atvr": min_atvr,
                             "total_stocks_analyzed": len(df_msci),
                             "status_distribution": status_counts.to_dict()
@@ -1932,15 +1969,15 @@ with tabs[8]:
             st.markdown("#### ℹ️ Preview Criteria")
             st.info(f"""
             **Kriteria saat ini:**
-            - Kurs USD/IDR: Rp {usd_idr:,}
-            - Minimum Float Market Cap: ${min_float_mcap_usd}B
-            - Minimum Liquidity (ATVR): {min_atvr}%
+            - Kurs US$/IDR: Rp {usd_idr:,}
+            - Minimal Float Market Cap: US$ {min_float_mcap_usd_miliar} Miliar
+            - Minimal Liquidity (ATVR): {min_atvr}%
             
             **Klik 'Hitung MSCI Projection' untuk memulai simulasi.**
             """)
 
 # ==============================================================================
-# TAB 10: ANALISIS SEKTOR (TAB BARU)
+# TAB 10: ANALISIS SEKTOR (BAHASA INDONESIA)
 # ==============================================================================
 with tabs[9]:
     st.markdown("## 📊 Analisis Sektor")
@@ -2029,10 +2066,10 @@ with tabs[9]:
         display_stats = sector_stats.copy()
         display_stats['Avg Harga'] = display_stats['Avg Harga'].apply(lambda x: f"Rp {x:,.0f}")
         display_stats['Avg Change %'] = display_stats['Avg Change %'].apply(lambda x: f"{x:.2f}%")
-        display_stats['Total Value (Rp)'] = display_stats['Total Value (Rp)'].apply(lambda x: f"Rp {x/1e9:.1f}B")
-        display_stats['Total NFF (Rp)'] = display_stats['Total NFF (Rp)'].apply(lambda x: f"Rp {x/1e9:.1f}B")
-        display_stats['Total MFV (Rp)'] = display_stats['Total MFV (Rp)'].apply(lambda x: f"Rp {x/1e9:.1f}B")
-        display_stats['Total Volume'] = display_stats['Total Volume'].apply(lambda x: f"{x/1e9:.1f}B")
+        display_stats['Total Value (Rp)'] = display_stats['Total Value (Rp)'].apply(lambda x: format_rupiah(x))
+        display_stats['Total NFF (Rp)'] = display_stats['Total NFF (Rp)'].apply(lambda x: format_rupiah(x))
+        display_stats['Total MFV (Rp)'] = display_stats['Total MFV (Rp)'].apply(lambda x: format_rupiah(x))
+        display_stats['Total Volume'] = display_stats['Total Volume'].apply(lambda x: format_volume(x))
         
         st.dataframe(
             display_stats,
@@ -2050,3 +2087,14 @@ with tabs[9]:
         )
     else:
         st.warning("Tidak ada data untuk periode yang dipilih.")
+
+# ==============================================================================
+# 🎯 FOOTER
+# ==============================================================================
+st.markdown("---")
+st.markdown("""
+<div style="text-align: center; color: #6c757d; padding: 2rem;">
+    <p>📊 <strong>Quantum IDX Dashboard</strong> | Advanced Stock Analytics Platform</p>
+    <p style="font-size: 0.9rem;">© 2024 | Real-time Data Analytics & Simulation</p>
+</div>
+""", unsafe_allow_html=True)
