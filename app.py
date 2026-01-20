@@ -1325,77 +1325,429 @@ with tabs[3]:
         st.warning(msg)
 
 # ==============================================================================
-# TAB 5: FOREIGN FLOW (BAHASA INDONESIA)
+# TAB 5: FOREIGN FLOW (DIPERBAIKI DENGAN VISUALISASI KUMULATIF & BREAKDOWN)
 # ==============================================================================
 with tabs[4]:
-    st.markdown("## 🌊 Analisis Net Foreign Flow")
+    st.markdown("## 🌊 Analisis Net Foreign Flow Komprehensif")
     
-    nff7, nff30, nff90, nff180 = calculate_nff_top_stocks(df, pd.Timestamp(selected_date))
+    # ---- 1. FILTER PERIODE (Oct 2025 - Sekarang) ----
+    st.markdown("### 📅 Periode Analisis: Oktober 2025 - Sekarang")
     
-    # Tabs untuk periode berbeda
-    nff_tab1, nff_tab2, nff_tab3, nff_tab4 = st.tabs(["7 Hari", "30 Hari", "90 Hari", "180 Hari"])
+    # Tentukan tanggal mulai Oktober 2025
+    oct_2025 = pd.Timestamp('2025-10-01')
+    current_date = pd.Timestamp(selected_date)
     
-    with nff_tab1:
-        st.dataframe(
-            nff7.head(20).assign(
-                **{'Total Net FF (Rp)': lambda x: x['Total Net FF (Rp)'].apply(lambda y: format_rupiah(y)),
-                  'Harga Terakhir': lambda x: x['Harga Terakhir'].apply(lambda y: f"Rp {y:,.0f}")}
-            ),
-            hide_index=True,
-            use_container_width=True,
-            column_config={
-                "Stock Code": "Kode",
-                "Sector": "Sektor",
-                "Total Net FF (Rp)": "Total NFF",
-                "Harga Terakhir": "Harga"
-            }
+    # Filter data untuk periode tersebut
+    df_foreign_period = df[
+        (df['Last Trading Date'] >= oct_2025) & 
+        (df['Last Trading Date'] <= current_date)
+    ].copy()
+    
+    if df_foreign_period.empty:
+        st.warning("Data tidak tersedia untuk periode Oktober 2025 - sekarang.")
+    else:
+        # ---- 2. GRAFIK KUMULATIF FOREIGN FLOW ----
+        st.markdown("### 📈 Grafik Kumulatif Foreign Flow (Sejak Okt 2025)")
+        
+        # Hitung kumulatif harian
+        df_daily_nff = df_foreign_period.groupby('Last Trading Date').agg({
+            'NFF (Rp)': 'sum',
+            'Foreign Buy': 'sum',
+            'Foreign Sell': 'sum'
+        }).reset_index().sort_values('Last Trading Date')
+        
+        # Hitung kumulatif
+        df_daily_nff['NFF Kumulatif'] = df_daily_nff['NFF (Rp)'].cumsum()
+        df_daily_nff['Foreign Buy Kumulatif'] = df_daily_nff['Foreign Buy'].cumsum()
+        df_daily_nff['Foreign Sell Kumulatif'] = df_daily_nff['Foreign Sell'].cumsum()
+        
+        # Buat chart dengan area dan line
+        fig_cumulative = make_subplots(
+            rows=2, cols=1,
+            shared_xaxes=True,
+            vertical_spacing=0.1,
+            subplot_titles=('Kumulatif Net Foreign Flow (Rp)', 'Flow Harian (Rp)'),
+            row_heights=[0.6, 0.4]
         )
-    
-    with nff_tab2:
-        st.dataframe(
-            nff30.head(20).assign(
-                **{'Total Net FF (Rp)': lambda x: x['Total Net FF (Rp)'].apply(lambda y: format_rupiah(y)),
-                  'Harga Terakhir': lambda x: x['Harga Terakhir'].apply(lambda y: f"Rp {y:,.0f}")}
+        
+        # Line chart kumulatif
+        fig_cumulative.add_trace(
+            go.Scatter(
+                x=df_daily_nff['Last Trading Date'],
+                y=df_daily_nff['NFF Kumulatif'],
+                mode='lines',
+                name='NFF Kumulatif',
+                line=dict(color='#2ecc71', width=3),
+                fill='tozeroy',
+                fillcolor='rgba(46, 204, 113, 0.2)'
             ),
-            hide_index=True,
-            use_container_width=True
+            row=1, col=1
         )
-    
-    with nff_tab3:
-        st.dataframe(
-            nff90.head(20).assign(
-                **{'Total Net FF (Rp)': lambda x: x['Total Net FF (Rp)'].apply(lambda y: format_rupiah(y)),
-                  'Harga Terakhir': lambda x: x['Harga Terakhir'].apply(lambda y: f"Rp {y:,.0f}")}
+        
+        # Bar chart harian dengan warna berdasarkan positif/negatif
+        colors = ['#2ecc71' if x >= 0 else '#e74c3c' for x in df_daily_nff['NFF (Rp)']]
+        
+        fig_cumulative.add_trace(
+            go.Bar(
+                x=df_daily_nff['Last Trading Date'],
+                y=df_daily_nff['NFF (Rp)'],
+                name='NFF Harian',
+                marker_color=colors,
+                opacity=0.7
             ),
-            hide_index=True,
-            use_container_width=True
+            row=2, col=1
         )
-    
-    with nff_tab4:
-        st.dataframe(
-            nff180.head(20).assign(
-                **{'Total Net FF (Rp)': lambda x: x['Total Net FF (Rp)'].apply(lambda y: format_rupiah(y)),
-                  'Harga Terakhir': lambda x: x['Harga Terakhir'].apply(lambda y: f"Rp {y:,.0f}")}
-            ),
-            hide_index=True,
-            use_container_width=True
+        
+        fig_cumulative.update_layout(
+            height=600,
+            showlegend=True,
+            hovermode='x unified',
+            template='plotly_white',
+            title_font_size=16
         )
-    
-    # Visualisasi agregat
-    st.markdown("### 📊 Trend Foreign Flow")
-    
-    # Hitung agregat harian
-    df_nff_daily = df[df['Last Trading Date'] <= pd.Timestamp(selected_date)].groupby('Last Trading Date')['NFF (Rp)'].sum().reset_index()
-    
-    fig_nff_trend = px.area(
-        df_nff_daily.tail(60),
-        x='Last Trading Date',
-        y='NFF (Rp)',
-        title='Foreign Flow Kumulatif (60 Hari Terakhir)',
-        color_discrete_sequence=['#4361ee']
-    )
-    fig_nff_trend.update_layout(height=400)
-    st.plotly_chart(fig_nff_trend, use_container_width=True)
+        
+        fig_cumulative.update_xaxes(title_text="Tanggal", row=2, col=1)
+        fig_cumulative.update_yaxes(title_text="Kumulatif (Rp)", row=1, col=1)
+        fig_cumulative.update_yaxes(title_text="Harian (Rp)", row=2, col=1)
+        
+        st.plotly_chart(fig_cumulative, use_container_width=True)
+        
+        # ---- 3. METRIK SUMMARY ----
+        col_sum1, col_sum2, col_sum3, col_sum4 = st.columns(4)
+        
+        total_nff = df_daily_nff['NFF (Rp)'].sum()
+        avg_daily_nff = df_daily_nff['NFF (Rp)'].mean()
+        positive_days = len(df_daily_nff[df_daily_nff['NFF (Rp)'] > 0])
+        total_days = len(df_daily_nff)
+        positive_percentage = (positive_days / total_days * 100) if total_days > 0 else 0
+        
+        with col_sum1:
+            st.markdown(f"""
+            <div class="metric-card">
+                <div style="font-size:0.8rem; color:#6c757d;">Total NFF Periode</div>
+                <div style="font-size:1.5rem; font-weight:700; color:{'#2ecc71' if total_nff > 0 else '#e74c3c'};">{format_rupiah(total_nff)}</div>
+                <div style="font-size:0.8rem; margin-top:0.5rem;">Sejak {oct_2025.strftime('%d %b %Y')}</div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col_sum2:
+            st.markdown(f"""
+            <div class="metric-card">
+                <div style="font-size:0.8rem; color:#6c757d;">Rata² Harian</div>
+                <div style="font-size:1.5rem; font-weight:700;">{format_rupiah(avg_daily_nff)}</div>
+                <div style="font-size:0.8rem; margin-top:0.5rem;">{total_days} hari trading</div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col_sum3:
+            st.markdown(f"""
+            <div class="metric-card">
+                <div style="font-size:0.8rem; color:#6c757d;">Hari Positif</div>
+                <div style="font-size:1.5rem; font-weight:700; color:#2ecc71;">{positive_days}/{total_days}</div>
+                <div style="font-size:0.8rem; margin-top:0.5rem;">{positive_percentage:.1f}% hari positif</div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col_sum4:
+            current_cumulative = df_daily_nff['NFF Kumulatif'].iloc[-1] if not df_daily_nff.empty else 0
+            st.markdown(f"""
+            <div class="metric-card">
+                <div style="font-size:0.8rem; color:#6c757d;">Kumulatif Saat Ini</div>
+                <div style="font-size:1.5rem; font-weight:700; color={'#2ecc71' if current_cumulative > 0 else '#e74c3c'};">{format_rupiah(current_cumulative)}</div>
+                <div style="font-size:0.8rem; margin-top:0.5rem;">Sampai {current_date.strftime('%d %b %Y')}</div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        st.markdown("---")
+        
+        # ---- 4. BREAKDOWN SAHAM YANG DIBELI ASING ----
+        st.markdown("### 📊 Saham yang Paling Banyak Dibeli Asing (Sejak Okt 2025)")
+        
+        # Agregasi per saham
+        df_stock_nff = df_foreign_period.groupby('Stock Code').agg({
+            'NFF (Rp)': 'sum',
+            'Foreign Buy': 'sum',
+            'Foreign Sell': 'sum',
+            'Close': 'last',
+            'Sector': 'last'
+        }).reset_index().sort_values('NFF (Rp)', ascending=False)
+        
+        # Tambahkan kolom persentase
+        total_positive_nff = df_stock_nff[df_stock_nff['NFF (Rp)'] > 0]['NFF (Rp)'].sum()
+        df_stock_nff['Persentase dari Total Beli'] = (df_stock_nff['NFF (Rp)'] / total_positive_nff * 100) if total_positive_nff > 0 else 0
+        
+        # Filter hanya yang positif (dibeli asing)
+        df_bought = df_stock_nff[df_stock_nff['NFF (Rp)'] > 0].head(20)
+        
+        if not df_bought.empty:
+            # Tampilkan dalam 2 bagian: Visualisasi dan Tabel
+            col_viz, col_table = st.columns([3, 2])
+            
+            with col_viz:
+                # Treemap untuk visualisasi komposisi
+                fig_treemap = px.treemap(
+                    df_bought,
+                    path=['Sector', 'Stock Code'],
+                    values='NFF (Rp)',
+                    color='NFF (Rp)',
+                    color_continuous_scale='Greens',
+                    title='Komposisi Pembelian Asing per Sektor & Saham',
+                    hover_data=['Close', 'Persentase dari Total Beli']
+                )
+                fig_treemap.update_layout(height=500)
+                st.plotly_chart(fig_treemap, use_container_width=True)
+            
+            with col_table:
+                # Waterfall chart untuk top 10
+                st.markdown("#### 🥇 Top 10 Pembelian")
+                
+                top10 = df_bought.head(10).copy()
+                
+                fig_waterfall = go.Figure(go.Waterfall(
+                    name="NFF",
+                    orientation="v",
+                    measure=["relative"] * len(top10),
+                    x=top10['Stock Code'],
+                    y=top10['NFF (Rp)'],
+                    text=[format_rupiah(x) for x in top10['NFF (Rp)']],
+                    textposition="outside",
+                    connector={"line": {"color": "rgb(63, 63, 63)"}},
+                    increasing={"marker": {"color": "#2ecc71"}},
+                    decreasing={"marker": {"color": "#e74c3c"}}
+                ))
+                
+                fig_waterfall.update_layout(
+                    title="Top 10 Saham yang Dibeli Asing",
+                    height=400,
+                    showlegend=False,
+                    yaxis_title="Net Foreign Flow (Rp)"
+                )
+                
+                st.plotly_chart(fig_waterfall, use_container_width=True)
+            
+            st.markdown("---")
+            
+            # ---- 5. TABEL DETAIL BREAKDOWN ----
+            st.markdown("### 📋 Detail Pembelian Asing per Saham")
+            
+            # Buat tabs untuk berbagai view
+            breakdown_tabs = st.tabs(["Semua Pembelian", "Per Sektor", "Trend Harian"])
+            
+            with breakdown_tabs[0]:
+                # Format dataframe untuk display
+                display_bought = df_bought.copy()
+                display_bought['NFF (Rp)'] = display_bought['NFF (Rp)'].apply(lambda x: format_rupiah(x))
+                display_bought['Foreign Buy'] = display_bought['Foreign Buy'].apply(lambda x: format_volume(x))
+                display_bought['Foreign Sell'] = display_bought['Foreign Sell'].apply(lambda x: format_volume(x))
+                display_bought['Close'] = display_bought['Close'].apply(lambda x: f"Rp {x:,.0f}")
+                display_bought['Persentase dari Total Beli'] = display_bought['Persentase dari Total Beli'].apply(lambda x: f"{x:.2f}%")
+                
+                st.dataframe(
+                    display_bought[['Stock Code', 'Sector', 'Close', 'NFF (Rp)', 'Foreign Buy', 'Foreign Sell', 'Persentase dari Total Beli']],
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Stock Code": st.column_config.TextColumn("Kode", width="small"),
+                        "Sector": st.column_config.TextColumn("Sektor"),
+                        "Close": st.column_config.TextColumn("Harga Terakhir"),
+                        "NFF (Rp)": st.column_config.TextColumn("Total NFF"),
+                        "Foreign Buy": st.column_config.TextColumn("Buy Volume"),
+                        "Foreign Sell": st.column_config.TextColumn("Sell Volume"),
+                        "Persentase dari Total Beli": st.column_config.TextColumn("Kontribusi %")
+                    }
+                )
+            
+            with breakdown_tabs[1]:
+                # Agregasi per sektor
+                sector_breakdown = df_bought.groupby('Sector').agg({
+                    'Stock Code': 'count',
+                    'NFF (Rp)': 'sum',
+                    'Persentase dari Total Beli': 'sum'
+                }).reset_index().sort_values('NFF (Rp)', ascending=False)
+                
+                sector_breakdown = sector_breakdown.rename(columns={
+                    'Stock Code': 'Jumlah Saham',
+                    'NFF (Rp)': 'Total NFF Sektor',
+                    'Persentase dari Total Beli': 'Kontribusi %'
+                })
+                
+                # Format untuk display
+                sector_breakdown['Total NFF Sektor'] = sector_breakdown['Total NFF Sektor'].apply(lambda x: format_rupiah(x))
+                sector_breakdown['Kontribusi %'] = sector_breakdown['Kontribusi %'].apply(lambda x: f"{x:.2f}%")
+                
+                col_sec1, col_sec2 = st.columns([2, 1])
+                
+                with col_sec1:
+                    st.dataframe(
+                        sector_breakdown,
+                        use_container_width=True,
+                        hide_index=True
+                    )
+                
+                with col_sec2:
+                    # Pie chart sektor
+                    fig_sector_pie = px.pie(
+                        sector_breakdown,
+                        values='Jumlah Saham',
+                        names='Sector',
+                        title="Distribusi Jumlah Saham per Sektor",
+                        hole=0.4
+                    )
+                    fig_sector_pie.update_layout(height=300)
+                    st.plotly_chart(fig_sector_pie, use_container_width=True)
+            
+            with breakdown_tabs[2]:
+                # Pilih saham untuk melihat trend harian
+                selected_stock = st.selectbox(
+                    "Pilih Saham untuk Melihat Trend Harian",
+                    df_bought['Stock Code'].tolist(),
+                    index=0
+                )
+                
+                if selected_stock:
+                    # Filter data untuk saham yang dipilih
+                    df_stock_daily = df_foreign_period[
+                        df_foreign_period['Stock Code'] == selected_stock
+                    ].sort_values('Last Trading Date')
+                    
+                    if not df_stock_daily.empty:
+                        fig_stock_trend = make_subplots(
+                            rows=2, cols=1,
+                            shared_xaxes=True,
+                            vertical_spacing=0.1,
+                            subplot_titles=(f'NFF Harian - {selected_stock}', 'Kumulatif'),
+                            row_heights=[0.6, 0.4]
+                        )
+                        
+                        # Bar chart harian
+                        colors_daily = ['#2ecc71' if x >= 0 else '#e74c3c' for x in df_stock_daily['NFF (Rp)']]
+                        
+                        fig_stock_trend.add_trace(
+                            go.Bar(
+                                x=df_stock_daily['Last Trading Date'],
+                                y=df_stock_daily['NFF (Rp)'],
+                                name='NFF Harian',
+                                marker_color=colors_daily
+                            ),
+                            row=1, col=1
+                        )
+                        
+                        # Line chart kumulatif
+                        df_stock_daily['NFF Kumulatif'] = df_stock_daily['NFF (Rp)'].cumsum()
+                        
+                        fig_stock_trend.add_trace(
+                            go.Scatter(
+                                x=df_stock_daily['Last Trading Date'],
+                                y=df_stock_daily['NFF Kumulatif'],
+                                mode='lines+markers',
+                                name='Kumulatif',
+                                line=dict(color='#3498db', width=3)
+                            ),
+                            row=2, col=1
+                        )
+                        
+                        fig_stock_trend.update_layout(
+                            height=500,
+                            showlegend=True,
+                            hovermode='x unified'
+                        )
+                        
+                        fig_stock_trend.update_yaxes(title_text="NFF Harian (Rp)", row=1, col=1)
+                        fig_stock_trend.update_yaxes(title_text="Kumulatif (Rp)", row=2, col=1)
+                        
+                        st.plotly_chart(fig_stock_trend, use_container_width=True)
+                        
+                        # Stats untuk saham ini
+                        col_s1, col_s2, col_s3 = st.columns(3)
+                        
+                        with col_s1:
+                            total_stock_nff = df_stock_daily['NFF (Rp)'].sum()
+                            st.metric("Total NFF Saham", format_rupiah(total_stock_nff))
+                        
+                        with col_s2:
+                            avg_daily_stock = df_stock_daily['NFF (Rp)'].mean()
+                            st.metric("Rata² Harian", format_rupiah(avg_daily_stock))
+                        
+                        with col_s3:
+                            positive_days_stock = len(df_stock_daily[df_stock_daily['NFF (Rp)'] > 0])
+                            total_days_stock = len(df_stock_daily)
+                            st.metric("Hari Positif", f"{positive_days_stock}/{total_days_stock}")
+        
+        # ---- 6. EXPORT OPTIONS ----
+        st.markdown("---")
+        st.markdown("### 📥 Export Data")
+        
+        col_exp1, col_exp2 = st.columns(2)
+        
+        with col_exp1:
+            # Export data kumulatif harian
+            csv_daily = df_daily_nff.to_csv(index=False)
+            st.download_button(
+                label="📊 Download Data Kumulatif Harian",
+                data=csv_daily,
+                file_name=f"foreign_flow_cumulative_{oct_2025.date()}_to_{current_date.date()}.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+        
+        with col_exp2:
+            # Export data per saham
+            csv_stocks = df_stock_nff.to_csv(index=False)
+            st.download_button(
+                label="📈 Download Data per Saham",
+                data=csv_stocks,
+                file_name=f"foreign_flow_by_stock_{oct_2025.date()}_to_{current_date.date()}.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+        
+        # ---- 7. TABEL PERIODE LAIN (Tetap Pertahankan) ----
+        st.markdown("---")
+        st.markdown("### 📅 Perbandingan Periode Lain")
+        
+        nff7, nff30, nff90, nff180 = calculate_nff_top_stocks(df, pd.Timestamp(selected_date))
+        
+        nff_tab1, nff_tab2, nff_tab3, nff_tab4 = st.tabs(["7 Hari", "30 Hari", "90 Hari", "180 Hari"])
+        
+        with nff_tab1:
+            st.dataframe(
+                nff7.head(20).assign(
+                    **{'Total Net FF (Rp)': lambda x: x['Total Net FF (Rp)'].apply(lambda y: format_rupiah(y)),
+                      'Harga Terakhir': lambda x: x['Harga Terakhir'].apply(lambda y: f"Rp {y:,.0f}")}
+                ),
+                hide_index=True,
+                use_container_width=True
+            )
+        
+        with nff_tab2:
+            st.dataframe(
+                nff30.head(20).assign(
+                    **{'Total Net FF (Rp)': lambda x: x['Total Net FF (Rp)'].apply(lambda y: format_rupiah(y)),
+                      'Harga Terakhir': lambda x: x['Harga Terakhir'].apply(lambda y: f"Rp {y:,.0f}")}
+                ),
+                hide_index=True,
+                use_container_width=True
+            )
+        
+        with nff_tab3:
+            st.dataframe(
+                nff90.head(20).assign(
+                    **{'Total Net FF (Rp)': lambda x: x['Total Net FF (Rp)'].apply(lambda y: format_rupiah(y)),
+                      'Harga Terakhir': lambda x: x['Harga Terakhir'].apply(lambda y: f"Rp {y:,.0f}")}
+                ),
+                hide_index=True,
+                use_container_width=True
+            )
+        
+        with nff_tab4:
+            st.dataframe(
+                nff180.head(20).assign(
+                    **{'Total Net FF (Rp)': lambda x: x['Total Net FF (Rp)'].apply(lambda y: format_rupiah(y)),
+                      'Harga Terakhir': lambda x: x['Harga Terakhir'].apply(lambda y: f"Rp {y:,.0f}")}
+                ),
+                hide_index=True,
+                use_container_width=True
+            )
 
 # ==============================================================================
 # TAB 6: MONEY FLOW (BAHASA INDONESIA)
