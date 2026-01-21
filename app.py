@@ -1571,11 +1571,16 @@ with tabs[4]:
             display_bought['Value'] = display_bought['Value'].apply(lambda x: format_rupiah(x))
             
             # Hitung metrik tambahan
-            display_bought['Buy/Sell Ratio'] = np.where(
-                display_bought['Foreign Sell'] > 0,
-                display_bought['Foreign Buy'] / display_bought['Foreign Sell'],
-                0
-            )
+            buy_sell_ratios = []
+            for idx, row in df_bought_sorted.iterrows():  # Gunakan df_bought_sorted (data numerik)
+                if row['Foreign Sell'] > 0:
+                    ratio = row['Foreign Buy'] / row['Foreign Sell']
+                else:
+                    ratio = 0
+                buy_sell_ratios.append(ratio)
+            
+            # Tambahkan ke display_bought yang sudah diformat
+            display_bought['Buy/Sell Ratio'] = [f"{ratio:.2f}" for ratio in buy_sell_ratios]
             
             st.dataframe(
                 display_bought[['Rank', 'Stock Code', 'Sector', 'NFF (Rp)', 'Persentase dari Total Beli', 
