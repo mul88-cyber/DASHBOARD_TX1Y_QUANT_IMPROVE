@@ -241,133 +241,184 @@ def format_percentage(value):
     return f"{float(value):.2f}%"
 
 # ==============================================================================
-# 📦 3) FUNGSI MEMUAT DATA (via SERVICE ACCOUNT)
+# 📦 3) FUNGSI MEMUAT DATA (via SERVICE ACCOUNT) - VERSI DIPERBAIKI
 # ==============================================================================
 def get_gdrive_service():
+    """Fungsi untuk mendapatkan service Google Drive"""
     try:
+        # Coba ambil dari secrets
         creds_json = st.secrets["gcp_service_account"]
         creds = Credentials.from_service_account_info(creds_json, scopes=['https://www.googleapis.com/auth/drive.readonly'])
         service = build('drive', 'v3', credentials=creds, cache_discovery=False)
         return service, None
-    except KeyError:
-        msg = "❌ Gagal otentikasi: 'st.secrets' tidak menemukan key [gcp_service_account]. Pastikan 'secrets.toml' sudah benar."
-        return None, msg
+    except KeyError as e:
+        error_msg = f"❌ Gagal otentikasi: 'st.secrets' tidak menemukan key [gcp_service_account]. Error: {e}"
+        return None, error_msg
     except Exception as e:
-        msg = f"❌ Gagal otentikasi Google Drive: {e}."
-        return None, msg
+        error_msg = f"❌ Gagal otentikasi Google Drive: {e}"
+        return None, error_msg
 
-    @st.cache_data(ttl=3600, show_spinner=False)
-    def load_data():
-        """Mencari file transaksi, men-download, dan memetakan kolom yang sudah ada."""
+@st.cache_data(ttl=3600, show_spinner=False)
+def load_data():
+    """Mencari file transaksi, men-download, dan memetakan kolom yang sudah ada."""
+    try:
         with st.spinner("🔄 Memuat data dari Google Drive..."):
             service, error_msg = get_gdrive_service()
+            
             if error_msg:
                 return pd.DataFrame(), error_msg, "error"
-    
-            try:
-                # 1. Download File
-                query = f"'{FOLDER_ID}' in parents and name='{FILE_NAME}' and trashed=false"
-                results = service.files().list(
-                    q=query, fields="files(id, name)", orderBy="modifiedTime desc", pageSize=1
-                ).execute()
-                items = results.get('files', [])
-    
-                if not items:
-                    msg = f"❌ File '{FILE_NAME}' tidak ditemukan di folder GDrive."
-                    return pd.DataFrame(), msg, "error"
-    
-                file_id = items[0]['id']
-                request = service.files().get_media(fileId=file_id)
-                fh = io.BytesIO()
-                downloader = MediaIoBaseDownload(fh, request)
-                done = False
-                while done is False:
-                    status, done = downloader.next_chunk()
-                fh.seek(0)
-    
-                df = pd.read_csv(fh, dtype=object)
-    
-                # 2. Cleaning Nama Kolom
-                df.columns = df.columns.str.strip()
-                df['Last Trading Date'] = pd.to_datetime(df['Last Trading Date'], errors='coerce')
-                
-                # 3. Konversi Kolom Numerik (SESUAIKAN DENGAN KOLOM ANDA)
-                cols_to_numeric = [
-                    'Close', 'Volume', 'Value', 'Frequency', 'Foreign Buy', 'Foreign Sell',
-                    'Change', 'Previous', 'Volume Spike (x)', 'Change %', 
-                    'Listed Shares', 'Free Float', 'Open Price', 'High', 'Low',
-                    'Avg_Order_Volume', 'Bid', 'Bid Volume', 'Offer', 'Offer Volume',
-                    'Non Regular Volume', 'Non Regular Value', 'Non Regular Frequency',
-                    'VWMA_20D', 'MA20_vol', 'MA50_AOVol'
-                ]
-                
-                for col in cols_to_numeric:
-                    if col in df.columns:
-                        # Hapus koma/karakter aneh lalu convert ke float
-                        cleaned_col = df[col].astype(str).str.strip().str.replace(r'[,\sRp\%]', '', regex=True)
-                        df[col] = pd.to_numeric(cleaned_col, errors='coerce').fillna(0)
-                
-                # 4. Hapus data kosong tanggal/kode
-                df = df.dropna(subset=['Last Trading Date', 'Stock Code'])
-                
-                # ============================================================
-                # 🔗 MAPPING KOLOM (Sesuaikan dengan data Anda)
-                # ============================================================
-                
-                # HITUNG Net Foreign Flow (karena tidak ada di data)
-                if 'Foreign Buy' in df.columns and 'Foreign Sell' in df.columns:
-                    df['Net Foreign Flow'] = df['Foreign Buy'] - df['Foreign Sell']
-                    # Hitung NFF dalam Rupiah
-                    df['NFF (Rp)'] = df['Net Foreign Flow'] * df['Close']
-                else:
-                    df['Net Foreign Flow'] = 0
-                    df['NFF (Rp)'] = 0
-                
-                # HITUNG Money Flow Value (karena tidak ada di data)
-                # Money Flow = Typical Price * Volume
-                if 'Typical Price' in df.columns:
-                    df['Money Flow Value'] = df['Typical Price'] * df['Volume']
-                else:
-                    # Jika tidak ada Typical Price, gunakan Close sebagai proxy
-                    df['Money Flow Value'] = df['Close'] * df['Volume']
-                
-                # HITUNG TPxV (Total Price x Volume) jika tidak ada
-                if 'TPxV' not in df.columns:
-                    df['TPxV'] = df['Close'] * df['Volume']
-                
-                # Unusual Volume dari Volume Spike (x)
-                if 'Volume Spike (x)' in df.columns:
-                    df['Unusual Volume'] = df['Volume Spike (x)'] > 2.0
-                else:
-                    df['Unusual Volume'] = False
-                
-                # Big Player Anomaly
-                if 'Big_Player_Anomaly' in df.columns:
-                    df['Big_Player_Anomaly'] = df['Big_Player_Anomaly'].astype(str).str.strip().str.lower() == 'true'
-                else:
-                    df['Big_Player_Anomaly'] = False
-                
-                # Final Signal
-                if 'Final Signal' in df.columns:
-                    df['Final Signal'] = df['Final Signal'].astype(str).str.strip()
-                else:
-                    # Jika tidak ada, buat dari Signal
-                    if 'Signal' in df.columns:
-                        df['Final Signal'] = df['Signal']
-                    else:
-                        df['Final Signal'] = 'Netral'
-                
-                # Market Cap
-                if 'Listed Shares' in df.columns:
-                    df['Market Cap (Rp)'] = df['Close'] * df['Listed Shares']
-                    df['Market Cap (T)'] = df['Market Cap (Rp)'] / 1e12
-                
-                msg = f"✅ Data Berhasil Dimuat ({len(df):,} baris)"
-                return df, msg, "success"
-    
-            except Exception as e:
-                msg = f"❌ Terjadi error data: {e}."
+            
+            if service is None:
+                return pd.DataFrame(), "❌ Gagal mendapatkan service Google Drive", "error"
+
+            # 1. Download File
+            query = f"'{FOLDER_ID}' in parents and name='{FILE_NAME}' and trashed=false"
+            results = service.files().list(
+                q=query, fields="files(id, name)", orderBy="modifiedTime desc", pageSize=1
+            ).execute()
+            items = results.get('files', [])
+
+            if not items:
+                msg = f"❌ File '{FILE_NAME}' tidak ditemukan di folder GDrive."
                 return pd.DataFrame(), msg, "error"
+
+            file_id = items[0]['id']
+            request = service.files().get_media(fileId=file_id)
+            fh = io.BytesIO()
+            downloader = MediaIoBaseDownload(fh, request)
+            done = False
+            while done is False:
+                status, done = downloader.next_chunk()
+            fh.seek(0)
+
+            # Baca CSV
+            df = pd.read_csv(fh, dtype=object)
+
+            # 2. Cleaning Nama Kolom
+            df.columns = df.columns.str.strip()
+            
+            # 3. Konversi Last Trading Date
+            if 'Last Trading Date' in df.columns:
+                df['Last Trading Date'] = pd.to_datetime(df['Last Trading Date'], errors='coerce')
+            else:
+                return pd.DataFrame(), "❌ Kolom 'Last Trading Date' tidak ditemukan", "error"
+            
+            # 4. Konversi Kolom Numerik
+            numeric_columns = [
+                'Close', 'Volume', 'Value', 'Frequency', 'Foreign Buy', 'Foreign Sell',
+                'Change', 'Previous', 'Volume Spike (x)', 'Change %', 
+                'Listed Shares', 'Free Float', 'Open Price', 'High', 'Low',
+                'Avg_Order_Volume', 'Bid', 'Bid Volume', 'Offer', 'Offer Volume',
+                'Non Regular Volume', 'Non Regular Value', 'Non Regular Frequency',
+                'VWMA_20D', 'MA20_vol', 'MA50_AOVol', 'Typical Price', 'TPxV'
+            ]
+            
+            for col in numeric_columns:
+                if col in df.columns:
+                    # Bersihkan data
+                    try:
+                        cleaned = df[col].astype(str).str.strip()
+                        cleaned = cleaned.str.replace(r'[,\sRp\%]', '', regex=True)
+                        cleaned = cleaned.replace('', '0')
+                        df[col] = pd.to_numeric(cleaned, errors='coerce').fillna(0)
+                    except:
+                        df[col] = 0
+                else:
+                    # Jika kolom tidak ada, buat dengan nilai default
+                    df[col] = 0
+            
+            # 5. Hapus data kosong
+            df = df.dropna(subset=['Last Trading Date', 'Stock Code'])
+            
+            # ============================================================
+            # 🔗 HITUNG KOLOM YANG DIPERLUKAN
+            # ============================================================
+            
+            # Net Foreign Flow
+            if 'Foreign Buy' in df.columns and 'Foreign Sell' in df.columns:
+                df['Net Foreign Flow'] = df['Foreign Buy'] - df['Foreign Sell']
+                df['NFF (Rp)'] = df['Net Foreign Flow'] * df['Close']
+            else:
+                df['Net Foreign Flow'] = 0
+                df['NFF (Rp)'] = 0
+            
+            # Money Flow Value
+            if 'Typical Price' in df.columns and df['Typical Price'].sum() > 0:
+                df['Money Flow Value'] = df['Typical Price'] * df['Volume']
+            else:
+                df['Money Flow Value'] = df['Close'] * df['Volume']
+            
+            # TPxV jika tidak ada
+            if 'TPxV' not in df.columns or df['TPxV'].sum() == 0:
+                df['TPxV'] = df['Close'] * df['Volume']
+            
+            # Unusual Volume
+            if 'Volume Spike (x)' in df.columns:
+                df['Unusual Volume'] = df['Volume Spike (x)'] > 2.0
+            else:
+                df['Unusual Volume'] = False
+            
+            # Big Player Anomaly
+            if 'Big_Player_Anomaly' in df.columns:
+                df['Big_Player_Anomaly'] = df['Big_Player_Anomaly'].astype(str).str.strip().str.lower() == 'true'
+            else:
+                df['Big_Player_Anomaly'] = False
+            
+            # Final Signal
+            if 'Final Signal' in df.columns:
+                df['Final Signal'] = df['Final Signal'].astype(str).str.strip()
+            elif 'Signal' in df.columns:
+                df['Final Signal'] = df['Signal'].astype(str).str.strip()
+            else:
+                df['Final Signal'] = 'Netral'
+            
+            # Market Cap
+            if 'Listed Shares' in df.columns:
+                df['Market Cap (Rp)'] = df['Close'] * df['Listed Shares']
+                df['Market Cap (T)'] = df['Market Cap (Rp)'] / 1e12
+            else:
+                df['Market Cap (Rp)'] = 0
+                df['Market Cap (T)'] = 0
+            
+            # Pastikan tidak ada nilai infinity
+            df = df.replace([np.inf, -np.inf], np.nan).fillna(0)
+            
+            # Hitung jumlah baris
+            row_count = len(df)
+            
+            if row_count == 0:
+                return pd.DataFrame(), "⚠️ Data berhasil dimuat tetapi kosong", "warning"
+            
+            msg = f"✅ Data Berhasil Dimuat ({row_count:,} baris)"
+            return df, msg, "success"
+
+    except Exception as e:
+        error_msg = f"❌ Error saat memuat data: {str(e)}"
+        return pd.DataFrame(), error_msg, "error"
+
+# ==============================================================================
+# 🚀 MAIN EXECUTION - LOAD DATA
+# ==============================================================================
+
+# ---- LOAD DATA DENGAN ERROR HANDLING ----
+try:
+    df, status_msg, status_level = load_data()
+    
+    if status_level == "success":
+        st.toast("✅ Data berhasil dimuat!", icon="✅")
+        if not df.empty:
+            max_date = df['Last Trading Date'].max()
+            st.sidebar.success(f"Data terakhir: {max_date.strftime('%d %b %Y')}")
+    elif status_level == "error":
+        st.error(status_msg)
+        st.stop()
+    elif status_level == "warning":
+        st.warning(status_msg)
+        st.stop()
+        
+except Exception as e:
+    st.error(f"❌ Fatal Error: {str(e)}")
+    st.stop()
 
 # ==============================================================================
 # 🛠️ 4) FUNGSI KALKULASI UTAMA
