@@ -291,13 +291,14 @@ def get_gdrive_service():
                 df.columns = df.columns.str.strip()
                 df['Last Trading Date'] = pd.to_datetime(df['Last Trading Date'], errors='coerce')
                 
-                # 3. Konversi Kolom Numerik (PENTING)
-                # Kita masukkan Avg_Order_Volume & Volume Spike ke sini
+                # 3. Konversi Kolom Numerik (SESUAIKAN DENGAN KOLOM ANDA)
                 cols_to_numeric = [
                     'Close', 'Volume', 'Value', 'Frequency', 'Foreign Buy', 'Foreign Sell',
-                    'Change', 'Previous', 'Net Foreign Flow', 'Money Flow Value', 
-                    'Avg_Order_Volume', 'Volume Spike (x)', 'Change %', 'NFF (Rp)', 
-                    'Listed Shares', 'Free Float'
+                    'Change', 'Previous', 'Volume Spike (x)', 'Change %', 
+                    'Listed Shares', 'Free Float', 'Open Price', 'High', 'Low',
+                    'Avg_Order_Volume', 'Bid', 'Bid Volume', 'Offer', 'Offer Volume',
+                    'Non Regular Volume', 'Non Regular Value', 'Non Regular Frequency',
+                    'VWMA_20D', 'MA20_vol', 'MA50_AOVol'
                 ]
                 
                 for col in cols_to_numeric:
@@ -310,42 +311,56 @@ def get_gdrive_service():
                 df = df.dropna(subset=['Last Trading Date', 'Stock Code'])
                 
                 # ============================================================
-                # 🔗 MAPPING KOLOM (Agar sesuai dengan Logic Dashboard)
+                # 🔗 MAPPING KOLOM (Sesuaikan dengan data Anda)
                 # ============================================================
                 
-                # A. Fix 'Unusual Volume' (Penyebab Crash)
-                # Dashboard butuh boolean 'Unusual Volume', kita ambil dari 'Volume Spike (x)'
+                # HITUNG Net Foreign Flow (karena tidak ada di data)
+                if 'Foreign Buy' in df.columns and 'Foreign Sell' in df.columns:
+                    df['Net Foreign Flow'] = df['Foreign Buy'] - df['Foreign Sell']
+                    # Hitung NFF dalam Rupiah
+                    df['NFF (Rp)'] = df['Net Foreign Flow'] * df['Close']
+                else:
+                    df['Net Foreign Flow'] = 0
+                    df['NFF (Rp)'] = 0
+                
+                # HITUNG Money Flow Value (karena tidak ada di data)
+                # Money Flow = Typical Price * Volume
+                if 'Typical Price' in df.columns:
+                    df['Money Flow Value'] = df['Typical Price'] * df['Volume']
+                else:
+                    # Jika tidak ada Typical Price, gunakan Close sebagai proxy
+                    df['Money Flow Value'] = df['Close'] * df['Volume']
+                
+                # HITUNG TPxV (Total Price x Volume) jika tidak ada
+                if 'TPxV' not in df.columns:
+                    df['TPxV'] = df['Close'] * df['Volume']
+                
+                # Unusual Volume dari Volume Spike (x)
                 if 'Volume Spike (x)' in df.columns:
-                    # Anggap Unusual jika Volume > 2x Rata-rata (Spike > 2.0)
                     df['Unusual Volume'] = df['Volume Spike (x)'] > 2.0
                 else:
                     df['Unusual Volume'] = False
                 
-                # B. Fix 'Big_Player_Anomaly' (String -> Boolean)
+                # Big Player Anomaly
                 if 'Big_Player_Anomaly' in df.columns:
-                    # Convert string "True"/"False" ke Boolean Python
                     df['Big_Player_Anomaly'] = df['Big_Player_Anomaly'].astype(str).str.strip().str.lower() == 'true'
                 else:
                     df['Big_Player_Anomaly'] = False
-    
-                # C. Pastikan Final Signal String
+                
+                # Final Signal
                 if 'Final Signal' in df.columns:
                     df['Final Signal'] = df['Final Signal'].astype(str).str.strip()
                 else:
-                    df['Final Signal'] = 'Netral'
-    
-                # D. Hitung NFF (Rp) jika belum ada di CSV
-                if 'NFF (Rp)' not in df.columns:
-                     # Cek apakah 'Net Foreign Flow' ada
-                     if 'Net Foreign Flow' in df.columns:
-                         df['NFF (Rp)'] = df['Net Foreign Flow'] * df['Close']
-                     else:
-                         df['NFF (Rp)'] = 0
-    
-                # E. Market Cap
+                    # Jika tidak ada, buat dari Signal
+                    if 'Signal' in df.columns:
+                        df['Final Signal'] = df['Signal']
+                    else:
+                        df['Final Signal'] = 'Netral'
+                
+                # Market Cap
                 if 'Listed Shares' in df.columns:
-                     df['Market Cap (Rp)'] = df['Close'] * df['Listed Shares']
-                     df['Market Cap (T)'] = df['Market Cap (Rp)'] / 1e12
+                    df['Market Cap (Rp)'] = df['Close'] * df['Listed Shares']
+                    df['Market Cap (T)'] = df['Market Cap (Rp)'] / 1e12
                 
                 msg = f"✅ Data Berhasil Dimuat ({len(df):,} baris)"
                 return df, msg, "success"
